@@ -1,0 +1,248 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Community Management
+
+on:
+  workflow_call:
+    inputs:
+      enable_stale_management:
+        description: 'Enable stale issue and PR management'
+        required: false
+        type: boolean
+        default: true
+      enable_solved_issues:
+        description: 'Enable automatic closure of solved issues'
+        required: false
+        type: boolean
+        default: true
+      days_before_stale:
+        description: 'Days before marking items as stale'
+        required: false
+        type: number
+        default: 60
+      days_before_close:
+        description: 'Days before closing stale items'
+        required: false
+        type: number
+        default: 7
+      operations_per_run:
+        description: 'Maximum operations per run'
+        required: false
+        type: number
+        default: 100
+      exempt_issue_labels:
+        description: 'Labels that exempt issues from stale management'
+        required: false
+        type: string
+        default: 'pinned,security,enhancement,good first issue,help wanted,priority-high,priority-critical'
+      exempt_pr_labels:
+        description: 'Labels that exempt PRs from stale management'
+        required: false
+        type: string
+        default: 'work-in-progress,security,priority-high,priority-critical,dependencies'
+      stale_issue_message:
+        description: 'Custom message for stale issues'
+        required: false
+        type: string
+        default: ''
+      stale_pr_message:
+        description: 'Custom message for stale PRs'
+        required: false
+        type: string
+        default: ''
+      close_issue_message:
+        description: 'Custom message when closing stale issues'
+        required: false
+        type: string
+        default: ''
+      close_pr_message:
+        description: 'Custom message when closing stale PRs'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      stale_issues_processed:
+        description: 'Number of stale issues processed'
+        value: ${{ jobs.stale-management.outputs.stale-issues-processed || 0 }}
+      stale_prs_processed:
+        description: 'Number of stale PRs processed'
+        value: ${{ jobs.stale-management.outputs.stale-prs-processed || 0 }}
+
+# Use restrictive default permissions
+permissions:
+  contents: read
+
+jobs:
+  # Handle solved issues - close them immediately
+  close-solved-issues:
+    runs-on: ubuntu-latest
+    name: Close solved issues
+    if: inputs.enable_solved_issues
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Close solved issues immediately
+        uses: actions/stale@3a9db7e6a41a89f618792c92c0e97cc736e1b13f # v10.0.0
+        with:
+          repo-token: ${{ secrets.AUTOBOT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          any-of-labels: "solved"
+          stale-issue-label: "solved"
+          days-before-stale: 0
+          days-before-close: 0
+          stale-issue-message: ""
+          close-issue-message: |
+            This issue has been automatically closed because it was marked as solved.
+
+            Thank you for your contribution! 🙏
+
+  # Handle stale issues and PRs
+  stale-management:
+    runs-on: ubuntu-latest
+    name: Manage stale issues and PRs
+    if: inputs.enable_stale_management
+    outputs:
+      stale-issues-processed: ${{ steps.stale.outputs.stale-issues-processed }}
+      stale-prs-processed: ${{ steps.stale.outputs.stale-prs-processed }}
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Manage stale items
+        id: stale
+        uses: actions/stale@3a9db7e6a41a89f618792c92c0e97cc736e1b13f # v10.0.0
+        with:
+          # Repository token
+          repo-token: ${{ secrets.AUTOBOT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+
+          # Issues configuration
+          stale-issue-message: |
+            ${{ inputs.stale_issue_message != '' && inputs.stale_issue_message || 'This issue has been automatically marked as stale because it has not had recent activity. It will be closed in 7 days if no further activity occurs.
+
+            If you believe this issue is still relevant, please:
+            - Comment on this issue to keep it open
+            - Provide additional context or updates
+            - Submit a pull request that addresses the issue
+
+            Thank you for your contributions to this project! 🙏' }}
+
+          close-issue-message: |
+            ${{ inputs.close_issue_message != '' && inputs.close_issue_message || 'This issue has been automatically closed due to inactivity.
+
+            If you believe this issue should remain open, please reopen it with additional context or updates.
+            Thank you for your understanding! 🙏' }}
+
+          # Pull request configuration
+          stale-pr-message: |
+            ${{ inputs.stale_pr_message != '' && inputs.stale_pr_message || 'This pull request has been automatically marked as stale because it has not had recent activity. It will be closed in 7 days if no further activity occurs.
+
+            If this PR is still relevant, please:
+            - Rebase your branch on the latest main/develop branch
+            - Address any merge conflicts
+            - Respond to any review comments
+            - Add a comment explaining the current status
+
+            Thank you for your contribution! 🙏' }}
+
+          close-pr-message: |
+            ${{ inputs.close_pr_message != '' && inputs.close_pr_message || 'This pull request has been automatically closed due to inactivity.
+
+            If you would like to continue with this contribution:
+            - Reopen this PR and address the feedback
+            - Create a new PR with the updated changes
+
+            We appreciate your contribution and look forward to your continued involvement! 🙏' }}
+
+          # Timing configuration (in days)
+          days-before-stale: ${{ inputs.days_before_stale }}
+          days-before-close: ${{ inputs.days_before_close }}
+          days-before-pr-close: ${{ inputs.days_before_close }}
+
+          # Labels configuration
+          stale-issue-label: "stale"
+          stale-pr-label: "stale"
+          exempt-issue-labels: ${{ inputs.exempt_issue_labels }}
+          exempt-pr-labels: ${{ inputs.exempt_pr_labels }}
+          exempt-draft-pr: true
+
+          # Advanced configuration
+          operations-per-run: ${{ inputs.operations_per_run }}
+          remove-stale-when-updated: true # Remove stale label when updated
+          enable-statistics: true # Show statistics in logs
+
+          # Exemptions for specific cases
+          exempt-all-pr-assignees: true # Don't mark PRs with assignees as stale
+          exempt-all-issue-assignees: true # Don't mark issues with assignees as stale
+
+          # Only process items without recent activity
+          ignore-updates: true # Only consider comments, not all updates
+
+          # Rate limiting to be respectful to GitHub API
+          ascending: true # Process oldest items first
+
+  # Summary job
+  community-summary:
+    runs-on: ubuntu-latest
+    name: Community Management Summary
+    permissions:
+      contents: read
+    needs: [close-solved-issues, stale-management]
+    if: always()
+    steps:
+      - name: Generate community management summary
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const solvedEnabled = ${{ inputs.enable_solved_issues }};
+            const staleEnabled = ${{ inputs.enable_stale_management }};
+            
+            const solvedResult = '${{ needs.close-solved-issues.result }}';
+            const staleResult = '${{ needs.stale-management.result }}';
+            
+            const staleIssuesProcessed = '${{ needs.stale-management.outputs.stale-issues-processed }}' || '0';
+            const stalePrsProcessed = '${{ needs.stale-management.outputs.stale-prs-processed }}' || '0';
+            
+            let summary = '## 🤝 Community Management Summary\n\n';
+            
+            if (solvedEnabled) {
+              const solvedIcon = solvedResult === 'success' ? '✅' : (solvedResult === 'skipped' ? '⏭️' : '❌');
+              summary += `${solvedIcon} **Solved Issues Cleanup**: ${solvedResult || 'skipped'}\n`;
+            }
+            
+            if (staleEnabled) {
+              const staleIcon = staleResult === 'success' ? '✅' : (staleResult === 'skipped' ? '⏭️' : '❌');
+              summary += `${staleIcon} **Stale Management**: ${staleResult || 'skipped'}\n`;
+              
+              if (staleResult === 'success') {
+                summary += `  - Issues processed: ${staleIssuesProcessed}\n`;
+                summary += `  - PRs processed: ${stalePrsProcessed}\n`;
+              }
+            }
+            
+            if (!solvedEnabled && !staleEnabled) {
+              summary += '⚠️ No community management features were enabled.\n';
+            }
+            
+            summary += '\n### 📊 Configuration:\n';
+            summary += `- Days before stale: ${{ inputs.days_before_stale }}\n`;
+            summary += `- Days before close: ${{ inputs.days_before_close }}\n`;
+            summary += `- Operations per run: ${{ inputs.operations_per_run }}\n`;
+            
+            await core.summary
+              .addRaw(summary)
+              .write();
+              
+            console.log('Community management summary created');

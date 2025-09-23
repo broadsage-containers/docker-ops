@@ -1,0 +1,386 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Docker Publish
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: 'Container registry'
+        required: false
+        type: string
+        default: 'ghcr.io'
+      image_namespace:
+        description: 'Container image namespace'
+        required: false
+        type: string
+        default: ${{ github.repository_owner }}
+      build_platforms:
+        description: 'Build platforms for production'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      containers_path:
+        description: 'Path to containers directory'
+        required: false
+        type: string
+        default: 'library'
+      enable_cosign:
+        description: 'Enable container signing with Cosign'
+        required: false
+        type: boolean
+        default: true
+      enable_attestations:
+        description: 'Enable build attestations'
+        required: false
+        type: boolean
+        default: true
+      enable_sbom:
+        description: 'Enable SBOM generation'
+        required: false
+        type: boolean
+        default: true
+      max_parallel:
+        description: 'Maximum parallel builds'
+        required: false
+        type: number
+        default: 2
+      timeout_minutes:
+        description: 'Job timeout in minutes'
+        required: false
+        type: number
+        default: 120
+      containers_filter:
+        description: 'Filter for specific containers'
+        required: false
+        type: string
+        default: ''
+      force_all:
+        description: 'Force publish all containers'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      published_containers:
+        description: 'List of published containers'
+        value: ${{ jobs.publish-summary.outputs.published_containers }}
+      publish_success:
+        description: 'Whether all publishes succeeded'
+        value: ${{ jobs.publish-summary.outputs.publish_success }}
+
+env:
+  COSIGN_EXPERIMENTAL: 1
+
+# Use restrictive default permissions
+permissions:
+  contents: read
+
+jobs:
+  # Matrix generation job to discover containers to publish
+  discover-containers:
+    runs-on: ubuntu-latest
+    name: Discover Containers to Publish
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      has_changes: ${{ steps.discover.outputs.has_changes }}
+      container_count: ${{ steps.discover.outputs.container_count }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        if: ${{ !inputs.force_all }}
+        uses: step-security/changed-files@95b56dadb92a30ca9036f16423fd3c088a71ee94 # v46.0.5
+        with:
+          files: |
+            ${{ inputs.containers_path }}/**
+          files_ignore: |
+            **/*.md
+            **/*.txt
+            **/LICENSE
+            .github/**
+
+      - name: Discover containers
+        id: discover
+        shell: bash
+        run: |
+          containers_path="${{ inputs.containers_path }}"
+          containers_filter="${{ inputs.containers_filter }}"
+          force_all="${{ inputs.force_all }}"
+          changed_files="${{ steps.changed-files.outputs.all_changed_files }}"
+          
+          echo "Discovering containers for publishing in $containers_path"
+          
+          # Create matrix array
+          matrix='[]'
+          container_count=0
+          
+          # Find all Dockerfiles
+          while IFS= read -r -d '' dockerfile; do
+            container_dir=$(dirname "$dockerfile")
+            container_name=$(basename "$container_dir")
+            
+            # Apply filter if specified
+            if [[ -n "$containers_filter" && "$container_name" != *"$containers_filter"* ]]; then
+              echo "Skipping $container_name (doesn't match filter: $containers_filter)"
+              continue
+            fi
+            
+            # Check if we should publish this container
+            should_publish=false
+            
+            if [[ "$force_all" == "true" ]]; then
+              should_publish=true
+              echo "Publishing $container_name (force_all enabled)"
+            elif [[ -z "$changed_files" ]]; then
+              should_publish=true
+              echo "Publishing $container_name (no changed files detected, publishing all)"
+            else
+              # Check if any changed files are in this container's directory
+              while IFS= read -r changed_file; do
+                if [[ "$changed_file" == "$container_dir"* ]]; then
+                  should_publish=true
+                  echo "Publishing $container_name (changed: $changed_file)"
+                  break
+                fi
+              done <<< "$changed_files"
+            fi
+            
+            if [[ "$should_publish" == "true" ]]; then
+              # Add to matrix
+              matrix_entry=$(jq -n \
+                --arg container "$container_dir" \
+                --arg app "$container_name" \
+                --arg version "latest" \
+                --arg platform "linux" \
+                '{container: $container, app: $app, version: $version, platform: $platform}')
+              
+              matrix=$(echo "$matrix" | jq ". += [$matrix_entry]")
+              ((container_count++))
+            fi
+          done < <(find "$containers_path" -name "Dockerfile" -print0 2>/dev/null || true)
+          
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "container_count=$container_count" >> "$GITHUB_OUTPUT"
+          
+          if [[ $container_count -gt 0 ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Found $container_count containers to publish"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No containers found to publish"
+          fi
+
+  # Build and publish container images with signing
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    name: Build & Publish Containers
+    permissions:
+      contents: read
+      packages: write # For pushing images
+      id-token: write # For signing with Cosign
+      security-events: write # For security scan results
+      attestations: write # For build attestations
+    needs: discover-containers
+    if: needs.discover-containers.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max_parallel }}
+      matrix:
+        include: ${{ fromJSON(needs.discover-containers.outputs.matrix) }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Login to Container Registry
+        uses: docker/login-action@7403ea12dd9a8ed50fd44cd6d9cd2e7c85bd9b82 # v3.1.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        if: inputs.enable_cosign
+        uses: sigstore/cosign-installer@62e4a0a42bb14b3c26cc4db47e06027fb4d04f62 # v3.9.0
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Generate build metadata
+        id: metadata
+        uses: docker/metadata-action@bfee93e2e15b9d3b6fe8e5e8ae7ca6b7e64c1b09 # v5.5.4
+        with:
+          images: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.app }}
+            org.opencontainers.image.description=Container for ${{ matrix.app }}
+            org.opencontainers.image.vendor=Broadsage Corporation
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ fromJSON(steps.metadata.outputs.json).labels['org.opencontainers.image.created'] }}
+            maintainer=containers@broadsage.com
+            io.broadsage.image.build.workflow=${{ github.workflow }}
+            io.broadsage.image.build.run-id=${{ github.run_id }}
+
+      - name: Build and push container
+        id: build-push
+        uses: docker/build-push-action@a7871ad4ae7b8c57fafaeec6dd77a4d0e3ab7a9b # v6.10.0
+        with:
+          context: ${{ matrix.container }}
+          file: ${{ matrix.container }}/Dockerfile
+          platforms: ${{ inputs.build_platforms }}
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=publish-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=publish-${{ matrix.app }}
+          provenance: ${{ inputs.enable_attestations }}
+          sbom: ${{ inputs.enable_sbom }}
+
+      - name: Generate artifact attestation
+        if: inputs.enable_attestations
+        uses: actions/attest-build-provenance@8dd59b1e73ad11aef31b0e5b3ce7ae6ed7c097c3 # v1.5.5
+        with:
+          subject-name: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}
+          subject-digest: ${{ steps.build-push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Sign container image with Cosign
+        if: inputs.enable_cosign
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          echo "Signing container images with Cosign..."
+          images="${{ steps.metadata.outputs.tags }}"
+          digest="${{ steps.build-push.outputs.digest }}"
+          
+          # Sign all tags, but use the digest for consistency
+          image_with_digest="${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}@${digest}"
+          
+          echo "Signing: $image_with_digest"
+          cosign sign --yes "$image_with_digest"
+          
+          echo "✅ Container image signed successfully"
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@81b7c27a7c2deacf8e2a7d7ac2af5b5e6a4b0d35 # v0.33.0
+        with:
+          image-ref: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}@${{ steps.build-push.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.app }}.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        with:
+          sarif_file: 'trivy-results-${{ matrix.app }}.sarif'
+          category: 'trivy-${{ matrix.app }}'
+
+  # Summary job
+  publish-summary:
+    runs-on: ubuntu-latest
+    name: Publish Summary
+    permissions:
+      contents: read
+    needs: [discover-containers, build-and-publish]
+    if: always()
+    outputs:
+      published_containers: ${{ steps.summary.outputs.published_containers }}
+      publish_success: ${{ steps.summary.outputs.publish_success }}
+    steps:
+      - name: Generate publish summary
+        id: summary
+        shell: bash
+        run: |
+          discover_result="${{ needs.discover-containers.result }}"
+          publish_result="${{ needs.build-and-publish.result }}"
+          has_changes="${{ needs.discover-containers.outputs.has_changes }}"
+          container_count="${{ needs.discover-containers.outputs.container_count }}"
+          
+          echo "## 🚀 Container Publish Summary" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "$has_changes" == "true" ]]; then
+            echo "📦 **Containers processed:** $container_count" >> $GITHUB_STEP_SUMMARY
+            
+            # Check results
+            if [[ "$discover_result" == "success" ]]; then
+              echo "✅ **Discovery:** Completed successfully" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Discovery:** Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            if [[ "$publish_result" == "success" ]]; then
+              echo "✅ **Container Publishing:** All successful" >> $GITHUB_STEP_SUMMARY
+              echo "🔒 **Security:** Images signed and scanned" >> $GITHUB_STEP_SUMMARY
+              echo "publish_success=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "❌ **Container Publishing:** Some publishes failed" >> $GITHUB_STEP_SUMMARY
+              echo "publish_success=false" >> "$GITHUB_OUTPUT"
+            fi
+            
+            # Add security features status
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🛡️ Security Features" >> $GITHUB_STEP_SUMMARY
+            if [[ "${{ inputs.enable_cosign }}" == "true" ]]; then
+              echo "✅ **Cosign signing:** Enabled" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ **Cosign signing:** Disabled" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            if [[ "${{ inputs.enable_attestations }}" == "true" ]]; then
+              echo "✅ **Build attestations:** Enabled" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ **Build attestations:** Disabled" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            if [[ "${{ inputs.enable_sbom }}" == "true" ]]; then
+              echo "✅ **SBOM generation:** Enabled" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ **SBOM generation:** Disabled" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ **No containers found to publish**" >> $GITHUB_STEP_SUMMARY
+            echo "publish_success=true" >> "$GITHUB_OUTPUT"
+          fi
+          
+          echo "published_containers=$container_count" >> "$GITHUB_OUTPUT"
+          
+          # Set exit code
+          if [[ "$discover_result" == "success" && ("$has_changes" == "false" || "$publish_result" == "success") ]]; then
+            echo "✅ All operations completed successfully"
+          else
+            echo "❌ Some operations failed"
+            exit 1
+          fi

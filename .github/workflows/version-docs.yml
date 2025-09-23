@@ -1,0 +1,116 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Version Documentation
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-version-docs:
+    name: Update Version References
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Get latest version
+        id: version
+        run: |
+          # Get the latest release tag
+          LATEST_VERSION=$(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          
+          # Extract major version
+          MAJOR_VERSION=$(echo $LATEST_VERSION | cut -d. -f1)
+          echo "major=$MAJOR_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Latest version: $LATEST_VERSION"
+          echo "Major version: $MAJOR_VERSION"
+
+      - name: Update README examples
+        run: |
+          echo "🔄 Updating version references in README.md..."
+          
+          # Update README.md to use the latest major version in examples
+          sed -i.bak "s|@v[0-9]\+|@${{ steps.version.outputs.major }}|g" README.md
+          
+          # Show changes
+          if ! cmp -s README.md README.md.bak; then
+            echo "Changes made to README.md:"
+            diff README.md.bak README.md || true
+            rm README.md.bak
+          else
+            echo "No changes needed in README.md"
+            rm README.md.bak
+          fi
+
+      - name: Create version info file
+        run: |
+          cat << EOF > VERSION_INFO.md
+          # Version Information
+          
+          ## Current Versions
+          
+          - **Latest Release**: ${{ steps.version.outputs.latest }}
+          - **Latest Major**: ${{ steps.version.outputs.major }}
+          
+          ## Available Tags
+          
+          ### Exact Versions
+          \`\`\`
+          $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10)
+          \`\`\`
+          
+          ### Major/Minor Tags
+          \`\`\`
+          $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+(\.[0-9]+)?$' | head -10)
+          \`\`\`
+          
+          ## Usage Recommendations
+          
+          ### For Production (Recommended)
+          Pin to exact versions for maximum stability:
+          \`\`\`yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@${{ steps.version.outputs.latest }}
+          \`\`\`
+          
+          ### For Development
+          Use major version tags to get compatible updates:
+          \`\`\`yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@${{ steps.version.outputs.major }}
+          \`\`\`
+          
+          ---
+          *Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')*
+          EOF
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add README.md VERSION_INFO.md
+            git commit -m "docs: update version references to ${{ steps.version.outputs.latest }}
+            
+            - Update README examples to use ${{ steps.version.outputs.major }}
+            - Generate VERSION_INFO.md with current version status
+            - Automated update from release ${{ steps.version.outputs.latest }}"
+            
+            git push
+            echo "✅ Version documentation updated"
+          else
+            echo "ℹ️  No documentation changes needed"
+          fi

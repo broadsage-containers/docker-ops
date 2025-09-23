@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: OpenSSF Scorecard Analysis
+
+on:
+  workflow_call:
+    inputs:
+      publish_results:
+        description: 'Publish Scorecard results to OpenSSF API'
+        required: false
+        type: boolean
+        default: true
+      retention_days:
+        description: 'Scorecard artifact retention days'
+        required: false
+        type: number
+        default: 5
+      enable_code_scanning_upload:
+        description: 'Upload results to GitHub code scanning'
+        required: false
+        type: boolean
+        default: true
+      repo_token:
+        description: 'Repository token for enhanced checks'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      scorecard_score:
+        description: 'OpenSSF Scorecard overall score'
+        value: ${{ jobs.scorecard-analysis.outputs.score }}
+      analysis_success:
+        description: 'Whether Scorecard analysis completed successfully'
+        value: ${{ jobs.scorecard-analysis.outputs.success }}
+
+# Declare default permissions as read only.
+permissions: read-all
+
+jobs:
+  scorecard-analysis:
+    name: OpenSSF Scorecard Analysis
+    runs-on: ubuntu-latest
+    outputs:
+      score: ${{ steps.scorecard.outputs.score }}
+      success: ${{ steps.scorecard.outcome == 'success' }}
+    permissions:
+      # Needed to upload the results to code-scanning dashboard.
+      security-events: write
+      # Needed to publish results and get a badge (see publish_results below).
+      id-token: write
+      contents: read
+      actions: read
+      # To allow GraphQL ListCommits to work
+      issues: read
+      pull-requests: read
+      # To detect SAST tools
+      checks: read
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: "Run OpenSSF Scorecard analysis"
+        id: scorecard
+        uses: ossf/scorecard-action@05b42c624433fc40578a4040d5cf5e36ddca8cde #v2.4.2
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          # Use repo token if provided for enhanced checks
+          repo_token: ${{ inputs.repo_token || secrets.SCORECARD_TOKEN || '' }}
+
+          # Public repositories:
+          #   - Publish results to OpenSSF REST API for easy access by consumers
+          #   - Allows the repository to include the Scorecard badge.
+          #   - See https://github.com/ossf/scorecard-action#publishing-results.
+          # For private repositories:
+          #   - `publish_results` will always be set to `false`, regardless
+          #     of the value entered here.
+          publish_results: ${{ inputs.publish_results }}
+
+      - name: "Upload Scorecard artifact"
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: OpenSSF Scorecard SARIF
+          path: scorecard-results.sarif
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: "Upload Scorecard to code-scanning"
+        if: inputs.enable_code_scanning_upload
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 #v3.26.6
+        with:
+          sarif_file: scorecard-results.sarif
+          category: "OpenSSF Scorecard"
+
+      - name: "Parse Scorecard Results"
+        id: parse-results
+        if: always()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            
+            try {
+              // Try to read and parse the SARIF file for scoring info
+              if (fs.existsSync('scorecard-results.sarif')) {
+                const sarif = JSON.parse(fs.readFileSync('scorecard-results.sarif', 'utf8'));
+                
+                // Extract score information if available
+                const runs = sarif.runs || [];
+                if (runs.length > 0 && runs[0].properties) {
+                  const score = runs[0].properties.score || 'N/A';
+                  core.setOutput('score', score);
+                  
+                  console.log(`📊 OpenSSF Scorecard Score: ${score}`);
+                  
+                  // Create summary
+                  await core.summary
+                    .addHeading('🔒 OpenSSF Scorecard Analysis Results')
+                    .addTable([
+                      ['Metric', 'Value'],
+                      ['Overall Score', score.toString()],
+                      ['Repository', context.repo.owner + '/' + context.repo.repo],
+                      ['Analysis Date', new Date().toISOString().split('T')[0]]
+                    ])
+                    .addRaw('\n### 📋 Next Steps:\n')
+                    .addRaw('- Review the uploaded SARIF report for detailed findings\n')
+                    .addRaw('- Check the [OpenSSF Scorecard documentation](https://github.com/ossf/scorecard) for improvement recommendations\n')
+                    .addRaw('- Consider implementing security best practices to improve your score\n')
+                    .write();
+                } else {
+                  console.log('⚠️ Score information not found in SARIF results');
+                  core.setOutput('score', 'N/A');
+                }
+              } else {
+                console.log('⚠️ Scorecard results file not found');
+                core.setOutput('score', 'N/A');
+                
+                await core.summary
+                  .addHeading('🔒 OpenSSF Scorecard Analysis')
+                  .addRaw('Scorecard analysis completed but results file was not generated. Check the workflow logs for details.')
+                  .write();
+              }
+            } catch (error) {
+              console.log(`❌ Error parsing Scorecard results: ${error.message}`);
+              core.setOutput('score', 'Error');
+              
+              await core.summary
+                .addHeading('🔒 OpenSSF Scorecard Analysis')
+                .addRaw(`Error parsing results: ${error.message}`)
+                .write();
+            }
