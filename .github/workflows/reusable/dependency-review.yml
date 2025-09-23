@@ -1,0 +1,186 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Dependency Review
+
+on:
+  workflow_call:
+    inputs:
+      fail_on_severity:
+        description: 'Fail on vulnerability severity level'
+        required: false
+        type: string
+        default: 'moderate'
+      allow_licenses:
+        description: 'Comma-separated list of allowed licenses'
+        required: false
+        type: string
+        default: 'GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0, ISC, MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, Unlicense'
+      deny_licenses:
+        description: 'Comma-separated list of denied licenses'
+        required: false
+        type: string
+        default: ''
+      fail_on_scopes:
+        description: 'Dependency scopes to check'
+        required: false
+        type: string
+        default: 'runtime'
+      comment_summary_in_pr:
+        description: 'Comment dependency summary in PR'
+        required: false
+        type: boolean
+        default: true
+      enable_retry:
+        description: 'Enable retry on failure'
+        required: false
+        type: boolean
+        default: true
+      retry_times:
+        description: 'Number of retries'
+        required: false
+        type: number
+        default: 3
+    outputs:
+      review_passed:
+        description: 'Whether dependency review passed'
+        value: ${{ jobs.dependency-review.outputs.passed }}
+      vulnerabilities_found:
+        description: 'Number of vulnerabilities found'
+        value: ${{ jobs.dependency-review.outputs.vulnerabilities_found }}
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    # Only run on pull requests - dependency review analyzes changes
+    if: github.event_name == 'pull_request'
+    outputs:
+      passed: ${{ steps.dependency-review.outcome == 'success' }}
+      vulnerabilities_found: ${{ steps.parse-results.outputs.vulnerabilities_found }}
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: "Checkout Repository"
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: "Dependency Review (Attempt 1)"
+        id: dependency-review
+        uses: actions/dependency-review-action@595b5aeba73380359d98a5e087f648dbb0edce1b # v4.7.3
+        continue-on-error: ${{ inputs.enable_retry }}
+        with:
+          # Fail the action on vulnerabilities
+          fail-on-severity: ${{ inputs.fail_on_severity }}
+          # License configuration
+          allow-licenses: ${{ inputs.allow_licenses }}
+          deny-licenses: ${{ inputs.deny_licenses }}
+          # Scope configuration  
+          fail-on-scopes: ${{ inputs.fail_on_scopes }}
+          # Comment configuration
+          comment-summary-in-pr: ${{ inputs.comment_summary_in_pr }}
+          # Output configuration
+          config-file: '.github/dependency-review-config.yml'
+
+      - name: "Dependency Review (Retry)"
+        id: dependency-review-retry
+        if: inputs.enable_retry && steps.dependency-review.outcome == 'failure' && inputs.retry_times > 1
+        uses: actions/dependency-review-action@595b5aeba73380359d98a5e087f648dbb0edce1b # v4.7.3
+        continue-on-error: true
+        with:
+          fail-on-severity: ${{ inputs.fail_on_severity }}
+          allow-licenses: ${{ inputs.allow_licenses }}
+          deny-licenses: ${{ inputs.deny_licenses }}
+          fail-on-scopes: ${{ inputs.fail_on_scopes }}
+          comment-summary-in-pr: false # Don't duplicate comments on retry
+
+      - name: "Parse Dependency Review Results"
+        id: parse-results
+        if: always()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const firstAttempt = '${{ steps.dependency-review.outcome }}';
+            const retryAttempt = '${{ steps.dependency-review-retry.outcome }}';
+            const enableRetry = ${{ inputs.enable_retry }};
+            
+            let finalResult = firstAttempt;
+            let attemptDetails = 'Single attempt';
+            
+            if (enableRetry && firstAttempt === 'failure' && retryAttempt) {
+              finalResult = retryAttempt;
+              attemptDetails = `Initial: ${firstAttempt}, Retry: ${retryAttempt}`;
+            }
+            
+            // Set outputs
+            core.setOutput('final_result', finalResult);
+            core.setOutput('vulnerabilities_found', finalResult === 'failure' ? 'Yes' : 'No');
+            
+            // Create summary
+            const statusIcon = finalResult === 'success' ? '✅' : '❌';
+            const statusText = finalResult === 'success' ? 'Passed' : 'Failed';
+            
+            let summary = `## 🔍 Dependency Review Results\n\n`;
+            summary += `${statusIcon} **Status**: ${statusText}\n`;
+            summary += `📊 **Attempt Details**: ${attemptDetails}\n`;
+            summary += `🔒 **Severity Threshold**: ${inputs.fail_on_severity}\n`;
+            summary += `📋 **Scopes Checked**: ${inputs.fail_on_scopes}\n\n`;
+            
+            if (finalResult === 'success') {
+              summary += `### ✅ All Clear!\n`;
+              summary += `No vulnerabilities found at or above the **${inputs.fail_on_severity}** severity level.\n\n`;
+              summary += `### 📝 What was checked:\n`;
+              summary += `- 🔍 **Vulnerabilities**: Scanned for known security issues\n`;
+              summary += `- ⚖️ **Licenses**: Verified against allowed license list\n`;
+              summary += `- 📦 **Dependencies**: Analyzed ${inputs.fail_on_scopes} scope changes\n`;
+            } else {
+              summary += `### ⚠️ Issues Found\n`;
+              summary += `Vulnerabilities or license issues were detected in the dependency changes.\n\n`;
+              summary += `### 🛠️ Next Steps:\n`;
+              summary += `1. Review the detailed dependency report above\n`;
+              summary += `2. Update vulnerable dependencies to secure versions\n`;
+              summary += `3. Consider alternative packages if needed\n`;
+              summary += `4. Review license compatibility issues\n`;
+            }
+            
+            summary += `\n### 📚 Resources:\n`;
+            summary += `- [GitHub Advisory Database](https://github.com/advisories)\n`;
+            summary += `- [Dependency Review Documentation](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-dependency-review)\n`;
+            
+            await core.summary.addRaw(summary).write();
+            
+            console.log(`Dependency Review completed with result: ${finalResult}`);
+            
+            // Fail the step if final result is failure
+            if (finalResult === 'failure') {
+              core.setFailed('Dependency review found vulnerabilities or license issues');
+            }
+
+  # Summary job for when not running on PR
+  dependency-review-summary:
+    name: Dependency Review Summary
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Skip Dependency Review
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            await core.summary
+              .addHeading('🔍 Dependency Review')
+              .addRaw('⏭️ **Skipped**: Dependency review only runs on pull requests to analyze changes.')
+              .addRaw('\n\nDependency review analyzes the differences between the base and head commits, so it requires a pull request context.')
+              .write();
+              
+            console.log('ℹ️ Dependency review skipped - not running on pull request');

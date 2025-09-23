@@ -1,0 +1,203 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+name: Complete Security Analysis
+
+on:
+  workflow_call:
+    inputs:
+      # Scorecard inputs
+      publish_scorecard_results:
+        description: 'Publish Scorecard results to OpenSSF API'
+        required: false
+        type: boolean
+        default: true
+      scorecard_retention_days:
+        description: 'Scorecard artifact retention days'
+        required: false
+        type: number
+        default: 5
+      enable_code_scanning_upload:
+        description: 'Upload results to GitHub code scanning'
+        required: false
+        type: boolean
+        default: true
+      
+      # Dependency Review inputs
+      fail_on_severity:
+        description: 'Fail on vulnerability severity level'
+        required: false
+        type: string
+        default: 'moderate'
+      allow_licenses:
+        description: 'Comma-separated list of allowed licenses'
+        required: false
+        type: string
+        default: 'GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0, ISC, MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, Unlicense'
+      comment_summary_in_pr:
+        description: 'Comment dependency summary in PR'
+        required: false
+        type: boolean
+        default: true
+        
+      # Control inputs
+      run_scorecard:
+        description: 'Run OpenSSF Scorecard analysis'
+        required: false
+        type: boolean
+        default: true
+      run_dependency_review:
+        description: 'Run dependency review (PRs only)'
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      scorecard_score:
+        description: 'OpenSSF Scorecard score'
+        value: ${{ jobs.security-scorecard.outputs.scorecard_score }}
+      dependency_review_passed:
+        description: 'Whether dependency review passed'
+        value: ${{ jobs.dependency-review.outputs.review_passed }}
+      overall_security_status:
+        description: 'Overall security analysis status'
+        value: ${{ jobs.security-summary.outputs.overall_status }}
+
+permissions: read-all
+
+jobs:
+  security-scorecard:
+    name: OpenSSF Scorecard
+    if: inputs.run_scorecard
+    uses: ./.github/workflows/reusable/security-scorecard.yml
+    with:
+      publish_results: ${{ inputs.publish_scorecard_results }}
+      retention_days: ${{ inputs.scorecard_retention_days }}
+      enable_code_scanning_upload: ${{ inputs.enable_code_scanning_upload }}
+    secrets: inherit
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+      checks: read
+
+  dependency-review:
+    name: Dependency Review
+    if: inputs.run_dependency_review
+    uses: ./.github/workflows/reusable/dependency-review.yml
+    with:
+      fail_on_severity: ${{ inputs.fail_on_severity }}
+      allow_licenses: ${{ inputs.allow_licenses }}
+      comment_summary_in_pr: ${{ inputs.comment_summary_in_pr }}
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+
+  security-summary:
+    name: Security Analysis Summary
+    runs-on: ubuntu-latest
+    needs: [security-scorecard, dependency-review]
+    if: always()
+    outputs:
+      overall_status: ${{ steps.summary.outputs.overall_status }}
+    permissions:
+      contents: read
+    steps:
+      - name: Create Security Analysis Summary
+        id: summary
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const scorecardEnabled = ${{ inputs.run_scorecard }};
+            const dependencyReviewEnabled = ${{ inputs.run_dependency_review }};
+            
+            const scorecardResult = '${{ needs.security-scorecard.result }}';
+            const dependencyReviewResult = '${{ needs.dependency-review.result }}';
+            
+            const scorecardScore = '${{ needs.security-scorecard.outputs.scorecard_score }}';
+            const dependencyPassed = '${{ needs.dependency-review.outputs.review_passed }}';
+            
+            let summary = '## 🛡️ Complete Security Analysis Results\n\n';
+            
+            // Scorecard results
+            if (scorecardEnabled) {
+              const scorecardIcon = scorecardResult === 'success' ? '✅' : (scorecardResult === 'skipped' ? '⏭️' : '❌');
+              summary += `${scorecardIcon} **OpenSSF Scorecard**: ${scorecardResult}`;
+              if (scorecardScore && scorecardScore !== 'N/A') {
+                summary += ` (Score: ${scorecardScore})`;
+              }
+              summary += '\n';
+            }
+            
+            // Dependency Review results
+            if (dependencyReviewEnabled) {
+              const isPR = context.eventName === 'pull_request';
+              if (isPR) {
+                const depIcon = dependencyReviewResult === 'success' ? '✅' : (dependencyReviewResult === 'skipped' ? '⏭️' : '❌');
+                summary += `${depIcon} **Dependency Review**: ${dependencyReviewResult}\n`;
+              } else {
+                summary += `⏭️ **Dependency Review**: Skipped (not a PR)\n`;
+              }
+            }
+            
+            // Overall status
+            let overallStatus = 'success';
+            let statusDetails = '';
+            
+            if (scorecardEnabled && scorecardResult === 'failure') {
+              overallStatus = 'failure';
+              statusDetails += 'Scorecard analysis failed. ';
+            }
+            
+            if (dependencyReviewEnabled && dependencyReviewResult === 'failure') {
+              overallStatus = 'failure';
+              statusDetails += 'Dependency review found issues. ';
+            }
+            
+            if (!scorecardEnabled && !dependencyReviewEnabled) {
+              overallStatus = 'skipped';
+              statusDetails = 'No security analysis enabled.';
+            }
+            
+            summary += '\n### 📊 Overall Status\n';
+            const overallIcon = overallStatus === 'success' ? '✅' : (overallStatus === 'skipped' ? '⏭️' : '❌');
+            summary += `${overallIcon} **Result**: ${overallStatus}\n`;
+            
+            if (statusDetails) {
+              summary += `**Details**: ${statusDetails}\n`;
+            }
+            
+            // Recommendations
+            summary += '\n### 🔧 Next Steps\n';
+            if (overallStatus === 'success') {
+              summary += '- ✅ All security checks passed successfully\n';
+              summary += '- 🔍 Review detailed reports for improvement opportunities\n';
+              summary += '- 📅 Security analysis will run automatically on future changes\n';
+            } else if (overallStatus === 'failure') {
+              summary += '- 🛠️ Address the identified security issues\n';
+              summary += '- 📋 Check the detailed reports for specific recommendations\n';
+              summary += '- 🔄 Re-run analysis after making changes\n';
+            }
+            
+            summary += '\n### 📚 Resources\n';
+            summary += '- [OpenSSF Scorecard](https://github.com/ossf/scorecard)\n';
+            summary += '- [GitHub Security Advisories](https://github.com/advisories)\n';
+            summary += '- [Supply Chain Security](https://docs.github.com/en/code-security/supply-chain-security)\n';
+            
+            // Set outputs
+            core.setOutput('overall_status', overallStatus);
+            
+            await core.summary.addRaw(summary).write();
+            
+            console.log(`Overall security analysis status: ${overallStatus}`);
+            
+            // Fail if overall status is failure
+            if (overallStatus === 'failure') {
+              core.setFailed('Security analysis found issues that need attention');
+            }
