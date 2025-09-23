@@ -21,19 +21,22 @@ on:
 
 jobs:
   quality-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1
     secrets: inherit
 
   security-scan:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/security-scorecard.yml@v1
-    secrets: inherit
+    uses: broadsage-containers/docker-ops/.github/workflows/security-scorecard.yml@v1
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
 
   dependency-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/dependency-review.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/dependency-review.yml@v1
     secrets: inherit
 
   build-validate:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1
     with:
       push_image: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     secrets: inherit
@@ -41,7 +44,7 @@ jobs:
   publish:
     needs: [quality-check, security-scan, build-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-publish.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v1
     with:
       enable_cosign: true
       enable_attestations: true
@@ -60,7 +63,7 @@ on:
 
 jobs:
   community-management:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/community-management.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/community-management.yml@v1
     with:
       days_before_stale: 60
       days_before_close: 7
@@ -71,13 +74,12 @@ jobs:
 
 | Workflow | Purpose | Key Features |
 |----------|---------|--------------|
-| [quality-gate.yml](.github/workflows/reusable/quality-gate.yml) | Code quality & linting | MegaLinter, automated fixes |
-| [security-scorecard.yml](.github/workflows/reusable/security-scorecard.yml) | OpenSSF security analysis | Repository security posture, scoring |
-| [dependency-review.yml](.github/workflows/reusable/dependency-review.yml) | PR dependency analysis | Vulnerability & license checking |
-| [security-full.yml](.github/workflows/reusable/security-full.yml) | Complete security analysis | Combined scorecard + dependency review |
-| [pr-build-validate.yml](.github/workflows/reusable/pr-build-validate.yml) | PR container builds & validation | Multi-platform builds, Hadolint, Trivy |
-| [pr-build-publish.yml](.github/workflows/reusable/pr-build-publish.yml) | PR container publishing | Cosign signing, SBOM, attestations |
-| [community-management.yml](.github/workflows/reusable/community-management.yml) | Issue/PR lifecycle | Stale management, solved issues |
+| [quality-gate.yml](.github/workflows/quality-gate.yml) | Code quality & linting | MegaLinter, automated fixes |
+| [security-scorecard.yml](.github/workflows/security-scorecard.yml) | OpenSSF security analysis | Repository security posture, scoring |
+| [dependency-review.yml](.github/workflows/dependency-review.yml) | PR dependency analysis | Vulnerability & license checking |
+| [pr-build-validate.yml](.github/workflows/pr-build-validate.yml) | PR container builds & validation | Multi-platform builds, Hadolint, Trivy |
+| [pr-build-publish.yml](.github/workflows/pr-build-publish.yml) | PR container publishing | Cosign signing, SBOM, attestations |
+| [community-management.yml](.github/workflows/community-management.yml) | Issue/PR lifecycle | Stale management, solved issues |
 
 ## 🎛️ **Workflow Configuration**
 
@@ -87,11 +89,11 @@ All workflows come with **sensible defaults** for enterprise use. Most repositor
 # Minimal configuration - uses all defaults
 jobs:
   quality:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1
     secrets: inherit
     
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1
     secrets: inherit
 ```
 
@@ -103,7 +105,7 @@ Override only the settings that differ from defaults:
 # Custom configuration - override specific settings
 jobs:
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1
     with:
       build_platforms: "linux/amd64"        # Override: single platform
       timeout_minutes: 120                  # Override: longer timeout
@@ -131,12 +133,6 @@ jobs:
 - `fail_on_severity`: Vulnerability severity threshold - default: `moderate`
 - `allow_licenses`: Allowed license list - default: `MIT, Apache-2.0, BSD-*`
 - `comment_summary_in_pr`: Comment in PR - default: `true`
-
-### security-full.yml
-
-- `run_scorecard`: Enable Scorecard analysis - default: `true`
-- `run_dependency_review`: Enable dependency review - default: `true`
-- `publish_scorecard_results`: Publish Scorecard results - default: `true`
 
 ### pr-build-validate.yml
 
@@ -189,13 +185,13 @@ This repository follows semantic versioning:
 
 ```yaml
 # Always use latest v1.x.x
-uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1
+uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1
 
 # Pin to specific minor version
-uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1.2
+uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1.2
 
 # Pin to exact version (most secure)
-uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1.2.3
+uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1.2.3
 ```
 
 ## 🤝 Contributing
