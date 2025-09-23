@@ -202,7 +202,7 @@ uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.ym
 
 1. **Fork** this repository
 2. **Create** a feature branch: `git checkout -b feature/amazing-feature`
-3. **Commit** your changes: `git commit -m 'Add amazing feature'`
+3. **Commit** your changes: `git commit -m 'feat: add amazing feature'`
 4. **Push** to the branch: `git push origin feature/amazing-feature`
 5. **Open** a Pull Request
 
@@ -214,7 +214,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 - **Issues**: [GitHub Issues](https://github.com/broadsage-containers/docker-ops/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/broadsage-containers/docker-ops/discussions)
-- **Email**: containers@broadsage.com
+- **Email**: [containers@broadsage.com](mailto:containers@broadsage.com)
 
 ---
 
