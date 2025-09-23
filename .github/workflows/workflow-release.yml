@@ -262,8 +262,6 @@ jobs:
           
           # Create release notes
           cat > ${workflow}_release_notes.md << EOF
-          # Release $version
-          
           ## Workflow: $workflow.yml
           
           **Version Bump:** $bump_type  
@@ -311,7 +309,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.version.outputs.new-version }}
-          release_name: ${{ steps.version.outputs.workflow }} ${{ steps.version.outputs.new-version }}
+          release_name: ${{ steps.version.outputs.new-version }}
           body_path: ${{ steps.notes.outputs.notes-file }}
           draft: false
           prerelease: false
