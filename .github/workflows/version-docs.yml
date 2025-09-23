@@ -56,9 +56,9 @@ jobs:
             rm README.md.bak
           fi
 
-      - name: Create version info file
+      - name: Create version file
         run: |
-          cat << EOF > VERSION_INFO.md
+          cat << EOF > VERSION.md
           # Version Information
           
           ## Current Versions
@@ -83,13 +83,13 @@ jobs:
           ### For Production (Recommended)
           Pin to exact versions for maximum stability:
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@${{ steps.version.outputs.latest }}
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.latest }}
           \`\`\`
           
           ### For Development
           Use major version tags to get compatible updates:
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@${{ steps.version.outputs.major }}
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.major }}
           \`\`\`
           
           ---
@@ -102,11 +102,11 @@ jobs:
           git config --local user.name "GitHub Action"
           
           if [[ -n "$(git status --porcelain)" ]]; then
-            git add README.md VERSION_INFO.md
+            git add README.md VERSION.md
             git commit -m "docs: update version references to ${{ steps.version.outputs.latest }}
             
             - Update README examples to use ${{ steps.version.outputs.major }}
-            - Generate VERSION_INFO.md with current version status
+            - Generate VERSION.md with current version status
             - Automated update from release ${{ steps.version.outputs.latest }}"
             
             git push
