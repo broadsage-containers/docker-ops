@@ -21,19 +21,19 @@ on:
 
 jobs:
   quality-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v0
     secrets: inherit
 
   security-scan:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/security-scorecard.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/security-scorecard.yml@v0
     secrets: inherit
 
   dependency-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/dependency-review.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/dependency-review.yml@v0
     secrets: inherit
 
   build-validate:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v0
     with:
       push_image: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     secrets: inherit
@@ -41,7 +41,7 @@ jobs:
   publish:
     needs: [quality-check, security-scan, build-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-publish.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-publish.yml@v0
     with:
       enable_cosign: true
       enable_attestations: true
@@ -60,7 +60,7 @@ on:
 
 jobs:
   community-management:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/community-management.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/community-management.yml@v0
     with:
       days_before_stale: 60
       days_before_close: 7
@@ -87,11 +87,11 @@ All workflows come with **sensible defaults** for enterprise use. Most repositor
 # Minimal configuration - uses all defaults
 jobs:
   quality:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v0
     secrets: inherit
     
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v0
     secrets: inherit
 ```
 
@@ -103,7 +103,7 @@ Override only the settings that differ from defaults:
 # Custom configuration - override specific settings
 jobs:
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/reusable/pr-build-validate.yml@v0
     with:
       build_platforms: "linux/amd64"        # Override: single platform
       timeout_minutes: 120                  # Override: longer timeout
@@ -189,13 +189,13 @@ This repository follows semantic versioning:
 
 ```yaml
 # Always use latest v1.x.x
-uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1
+uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v0
 
 # Pin to specific minor version
-uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1.2
+uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v0.2
 
 # Pin to exact version (most secure)
-uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v1.2.3
+uses: broadsage-containers/docker-ops/.github/workflows/reusable/quality-gate.yml@v0.2.3
 ```
 
 ## 🤝 Contributing
