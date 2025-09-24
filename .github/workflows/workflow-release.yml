@@ -244,7 +244,11 @@ jobs:
           echo "" >> release_notes.md
           
           # Look for action version changes in the diff
-          action_changes=$(git diff HEAD~1 HEAD -- .github/workflows/ | grep -E "^\+.*uses:|^\-.*uses:" | head -10 || echo "")
+          action_changes=""
+          if git diff HEAD~1 HEAD -- .github/workflows/ >/dev/null 2>&1; then
+            action_changes=$(git diff HEAD~1 HEAD -- .github/workflows/ | grep -E "^[\+\-].*uses:" | head -10 || true)
+          fi
+          
           if [[ -n "$action_changes" ]]; then
             echo "Recent action version changes detected:" >> release_notes.md
             echo "\`\`\`diff" >> release_notes.md
