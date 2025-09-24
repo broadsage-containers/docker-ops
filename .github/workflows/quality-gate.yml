@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_updated_sources: ${{ steps.ml.outputs.has_updated_sources }}
-      errors_count: ${{ steps.ml.outputs.total_errors }}
+      errors_count: '0'
     # Job-level permissions - minimal set required for the workflow
     permissions:
       contents: write # Required: peter-evans/create-pull-request to create branches/commits

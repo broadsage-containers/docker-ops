@@ -257,7 +257,7 @@ jobs:
 
       - name: Login to Container Registry
         if: inputs.push_image
-        uses: docker/login-action@7403ea12dd9a8ed50fd44cd6d9cd2e7c85bd9b82 # v3.1.0
+        uses: docker/login-action@v3
         with:
           registry: ${{ inputs.registry }}
           username: ${{ github.actor }}
@@ -265,7 +265,7 @@ jobs:
 
       - name: Generate build metadata
         id: metadata
-        uses: docker/metadata-action@bfee93e2e15b9d3b6fe8e5e8ae7ca6b7e64c1b09 # v5.5.4
+        uses: docker/metadata-action@v5
         with:
           images: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}
           tags: |
@@ -280,7 +280,7 @@ jobs:
             maintainer=containers@broadsage.com
 
       - name: Build and push container
-        uses: docker/build-push-action@a7871ad4ae7b8c57fafaeec6dd77a4d0e3ab7a9b # v6.10.0
+        uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.container }}
           file: ${{ matrix.container }}/Dockerfile
@@ -296,7 +296,7 @@ jobs:
 
       - name: Run Trivy security scan
         if: inputs.enable_security_scan
-        uses: aquasecurity/trivy-action@81b7c27a7c2deacf8e2a7d7ac2af5b5e6a4b0d35 # v0.33.0
+        uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}:${{ github.sha }}
           format: 'sarif'

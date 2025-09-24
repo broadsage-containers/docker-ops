@@ -110,8 +110,8 @@ jobs:
     name: Manage stale issues and PRs
     if: inputs.enable_stale_management
     outputs:
-      stale-issues-processed: ${{ steps.stale.outputs.stale-issues-processed }}
-      stale-prs-processed: ${{ steps.stale.outputs.stale-prs-processed }}
+      stale-issues-processed: ${{ steps.stale.outputs.staled-issues-prs }}
+      stale-prs-processed: ${{ steps.stale.outputs.staled-issues-prs }}
     permissions:
       issues: write
       pull-requests: write
