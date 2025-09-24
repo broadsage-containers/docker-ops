@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 ---
-name: Docker Publish
+name: Publish Approved PR
 
 on:
   workflow_call:
