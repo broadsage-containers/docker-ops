@@ -7,8 +7,13 @@ name: Version Documentation
 
 on:
   release:
-    types: [published]
+    types: [published, released]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to use for documentation update'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -33,89 +38,128 @@ jobs:
       - name: Get latest version
         id: version
         run: |
-          # Get the latest release tag
-          LATEST_VERSION=$(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          # Use manual input version if provided, otherwise get latest from releases/tags
+          if [[ -n "${{ inputs.version }}" ]]; then
+            LATEST_VERSION="${{ inputs.version }}"
+            echo "Using manual version: $LATEST_VERSION"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            LATEST_VERSION="${{ github.event.release.tag_name }}"
+            echo "Using release version: $LATEST_VERSION"
+          else
+            # Fallback to latest tag
+            LATEST_VERSION=$(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+            echo "Using latest tag: $LATEST_VERSION"
+          fi
+          
           echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
           
-          # Extract major version
+          # Extract major version (v1.2.3 -> v1)
           MAJOR_VERSION=$(echo $LATEST_VERSION | cut -d. -f1)
           echo "major=$MAJOR_VERSION" >> $GITHUB_OUTPUT
           
-          echo "Latest version: $LATEST_VERSION"
-          echo "Major version: $MAJOR_VERSION"
+          echo "✅ Latest version: $LATEST_VERSION"
+          echo "✅ Major version: $MAJOR_VERSION"
 
       - name: Update README examples
         run: |
           echo "🔄 Updating version references in README.md..."
           
-          # Update README.md to use the latest major version in examples
-          sed -i.bak "s|@v[0-9]\+|@${{ steps.version.outputs.major }}|g" README.md
+          # Update README.md examples to use the latest specific version
+          # Replace @v1.0.0 style versions with the new version
+          sed -i.bak "s|@v[0-9]\+\.[0-9]\+\.[0-9]\+|@${{ steps.version.outputs.latest }}|g" README.md
+          
+          # Also handle any remaining @v1 style references
+          sed -i.bak2 "s|@v[0-9]\+|@${{ steps.version.outputs.latest }}|g" README.md
           
           # Show changes
           if ! cmp -s README.md README.md.bak; then
-            echo "Changes made to README.md:"
+            echo "📝 Changes made to README.md:"
             diff README.md.bak README.md || true
-            rm README.md.bak
+            rm -f README.md.bak README.md.bak2
+            echo "updated=true" >> $GITHUB_OUTPUT
           else
-            echo "No changes needed in README.md"
-            rm README.md.bak
+            echo "ℹ️  No changes needed in README.md"
+            rm -f README.md.bak README.md.bak2
+            echo "updated=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Create version file
+        id: version-file
         run: |
+          echo "📄 Creating VERSION.md documentation..."
           cat << EOF > VERSION.md
           # Version Information
           
-          ## Current Versions
+          ## Current Release
           
-          - **Latest Release**: ${{ steps.version.outputs.latest }}
-          - **Latest Major**: ${{ steps.version.outputs.major }}
+          - **Latest Version**: ${{ steps.version.outputs.latest }}
+          - **Major Version**: ${{ steps.version.outputs.major }}
+          - **Release Date**: $(date -u '+%Y-%m-%d')
           
-          ## Available Tags
+          ## Usage Recommendations
           
-          ### Exact Versions
+          ### 🏆 Production (Recommended)
+          Pin to exact versions for maximum stability:
+          \`\`\`yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.latest }}
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@${{ steps.version.outputs.latest }}
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@${{ steps.version.outputs.latest }}
+          \`\`\`
+          
+          ### ⚡ Development
+          Use main branch for latest features (higher risk):
+          \`\`\`yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@main
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@main
+          \`\`\`
+          
+          ## Available Versions
+          
+          ### Recent Releases
           \`\`\`
           $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10)
           \`\`\`
           
-          ### Major/Minor Tags
-          \`\`\`
-          $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+(\.[0-9]+)?$' | head -10)
-          \`\`\`
+          ## Migration Guide
           
-          ## Usage Recommendations
+          If you were using the old per-workflow versioning:
           
-          ### For Production (Recommended)
-          Pin to exact versions for maximum stability:
           \`\`\`yaml
+          # ❌ OLD (no longer supported)
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@quality-gate-v1.2.3
+          
+          # ✅ NEW (unified versioning)  
           uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.latest }}
           \`\`\`
           
-          ### For Development
-          Use major version tags to get compatible updates:
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.major }}
-          \`\`\`
+          ## Resources
+          
+          - [Releases](https://github.com/broadsage-containers/docker-ops/releases) - Full changelog and release notes
+          - [Workflow Versioning Strategy](WORKFLOW_VERSIONING.md) - Detailed versioning approach
+          - [README](README.md) - Getting started guide
           
           ---
-          *Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')*
+          *Generated automatically on $(date -u '+%Y-%m-%d %H:%M:%S UTC') from release ${{ steps.version.outputs.latest }}*
           EOF
+          
+          echo "✅ VERSION.md created successfully"
+          echo "version-file-created=true" >> $GITHUB_OUTPUT
 
       - name: Commit changes
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           
+          # Check if there are any changes to commit
           if [[ -n "$(git status --porcelain)" ]]; then
+            echo "📝 Committing documentation updates..."
             git add README.md VERSION.md
-            git commit -m "docs: update version references to ${{ steps.version.outputs.latest }}
+            git commit -m "docs: update version references to ${{ steps.version.outputs.latest }} [skip ci]"
             
-            - Update README examples to use ${{ steps.version.outputs.major }}
-            - Generate VERSION.md with current version status
-            - Automated update from release ${{ steps.version.outputs.latest }}"
-            
+            echo "🚀 Pushing changes to repository..."
             git push
-            echo "✅ Version documentation updated"
+            echo "✅ Version documentation updated successfully"
           else
             echo "ℹ️  No documentation changes needed"
           fi

@@ -21,22 +21,22 @@ on:
 
 jobs:
   quality-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1.0.0
     secrets: inherit
 
   security-scan:
-    uses: broadsage-containers/docker-ops/.github/workflows/security-scorecard.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/security-scorecard.yml@v1.0.0
     permissions:
       security-events: write
       contents: read
       actions: read
 
   dependency-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/dependency-review.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/dependency-review.yml@v1.0.0
     secrets: inherit
 
   build-validate:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1.0.0
     with:
       push_image: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     secrets: inherit
@@ -44,7 +44,7 @@ jobs:
   publish:
     needs: [quality-check, security-scan, build-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v1.0.0
     with:
       enable_cosign: true
       enable_attestations: true
@@ -63,7 +63,7 @@ on:
 
 jobs:
   community-management:
-    uses: broadsage-containers/docker-ops/.github/workflows/community-management.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/community-management.yml@v1.0.0
     with:
       days_before_stale: 60
       days_before_close: 7
@@ -89,11 +89,11 @@ All workflows come with **sensible defaults** for enterprise use. Most repositor
 # Minimal configuration - uses all defaults
 jobs:
   quality:
-    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1.0.0
     secrets: inherit
     
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1.0.0
     secrets: inherit
 ```
 
@@ -105,7 +105,7 @@ Override only the settings that differ from defaults:
 # Custom configuration - override specific settings
 jobs:
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v1.0.0
     with:
       build_platforms: "linux/amd64"        # Override: single platform
       timeout_minutes: 120                  # Override: longer timeout
@@ -154,14 +154,6 @@ jobs:
 - `days_before_close`: Days before close - default: `7`
 - `exempt_issue_labels`: Protected labels - default: `pinned,security,enhancement`
 
-## 📚 Documentation
-
-- [Getting Started Guide](docs/getting-started/quick-start.md)
-- [Migration Guide](docs/getting-started/migration-guide.md)
-- [Workflow Reference](docs/reference/workflows.md)
-- [Security Features](docs/reference/security.md)
-- [Troubleshooting](docs/troubleshooting/common-issues.md)
-
 ## 🔒 Security Features
 
 All workflows include enterprise-grade security features:
@@ -173,26 +165,47 @@ All workflows include enterprise-grade security features:
 - **OpenSSF Scorecard**: Security posture analysis
 - **Dependency Review**: Automated dependency checks
 
+## ✨ Why Unified Versioning?
+
+Our new unified versioning approach provides significant benefits:
+
+- **🎯 Simplified Management**: One version number for all workflows
+- **📦 Consistent Releases**: All workflow updates bundled together
+- **🔒 Stable References**: No force-updated tags that break consumers
+- **📈 Industry Standard**: Follows GitHub Actions best practices
+- **🔍 Clear Changelog**: Single release notes with all changes
+- **⚡ Easier Upgrades**: Update once to get all improvements
+
+This approach eliminates the complexity of managing dozens of workflow-specific tags while providing a more predictable and maintainable versioning strategy.
+
 ## 📊 Versioning
 
-This repository follows semantic versioning:
+This repository uses **unified semantic versioning** for all workflows:
 
-- `v1` - Latest stable major version
-- `v1.2` - Latest in v1.2.x series  
-- `v1.2.3` - Specific version
+- **v1.2.3** - Specific release version (recommended for production)
+- **main** - Latest development version (automatic updates)
 
-### Usage Examples
+### 🏆 Recommended Usage Patterns
 
 ```yaml
-# Always use latest v1.x.x
-uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1
-
-# Pin to specific minor version
-uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1.2
-
-# Pin to exact version (most secure)
+# 🔒 PRODUCTION: Pin to specific version for maximum stability
 uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v1.2.3
+
+# ⚡ DEVELOPMENT: Use main branch for latest features (higher risk)
+uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
 ```
+
+### Version Bump Strategy
+
+This repository follows **semantic versioning**:
+
+- **Major (v2.0.0)**: Breaking changes that require consumer updates
+- **Minor (v1.1.0)**: New features, backward compatible
+- **Patch (v1.0.1)**: Bug fixes, security updates, dependencies
+
+### 📈 Version History
+
+See our [Releases](https://github.com/broadsage-containers/docker-ops/releases) page for detailed changelogs and upgrade guides.
 
 ## 🤝 Contributing
 
@@ -214,4 +227,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ---
 
-### Made with ❤️ by the Broadsage Team
+### Made with ❤️ by the Broadsage Containers Team
