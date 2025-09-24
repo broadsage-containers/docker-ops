@@ -196,7 +196,7 @@ jobs:
   # Summary job
   community-summary:
     runs-on: ubuntu-latest
-    name: Community Management Summary
+    name: Community Management Summary 
     permissions:
       contents: read
     needs: [close-solved-issues, stale-management]
