@@ -130,10 +130,17 @@ jobs:
       - name: Get latest version
         id: latest
         run: |
-          # Get the latest tag
-          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Get the latest semantic version tag (sorted properly)
+          latest_tag=$(git tag -l "v*" | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n1 || echo "v0.0.0")
           echo "latest-tag=$latest_tag" >> $GITHUB_OUTPUT
           echo "Current latest tag: $latest_tag"
+          
+          # Verify this tag exists and is reachable
+          if [[ "$latest_tag" != "v0.0.0" ]] && ! git rev-parse --verify "$latest_tag" >/dev/null 2>&1; then
+            echo "Warning: Latest tag $latest_tag not found, falling back to v0.0.0"
+            latest_tag="v0.0.0"
+            echo "latest-tag=$latest_tag" >> $GITHUB_OUTPUT
+          fi
       - name: Calculate new version
         id: version
         run: |
@@ -296,36 +303,33 @@ jobs:
           new_version="${{ steps.version.outputs.new-version }}"
           major_tag="${{ steps.version.outputs.major-tag }}"
           
-          echo "Creating tags: $new_version, $major_tag"
+          echo "Creating semantic version tags: $new_version, $major_tag"
           
-          # Check if specific version tag already exists
-          if git rev-parse "$new_version" >/dev/null 2>&1; then
-            echo "Tag $new_version already exists, skipping creation"
-          else
-            echo "Creating specific version tag: $new_version"
-            git tag -a "$new_version" -m "Release $new_version - workflow updates"
+          # Semantic versions should be unique - if it exists, something is wrong
+          if git rev-parse --verify "$new_version" >/dev/null 2>&1; then
+            echo "❌ ERROR: Semantic version tag $new_version already exists!"
+            echo "This indicates an issue with version calculation logic."
+            echo "Expected: Each semantic version should be unique"
+            git tag -l "v*" | sort -V | tail -5
+            exit 1
           fi
           
-          # Update major version tag (force update to handle existing tags)
-          echo "Creating/updating major version tag: $major_tag"
+          # Create the unique semantic version tag
+          echo "✅ Creating semantic version tag: $new_version"
+          git tag -a "$new_version" -m "Release $new_version - workflow updates"
+          
+          # Update major version tag (this one can be moved/updated)
+          echo "🔄 Updating major version tag: $major_tag"
           git tag -f -a "$major_tag" -m "Major version $major_tag (latest: $new_version)"
           
-          # Push tags with better error handling
-          echo "Pushing tags..."
-          
-          # Push specific version tag only if it was created
-          if ! git rev-parse --verify "origin/$new_version" >/dev/null 2>&1; then
-            echo "Pushing specific version tag: $new_version"
-            git push origin "$new_version"
-          else
-            echo "Tag $new_version already exists on remote, skipping push"
-          fi
-          
-          # Always push major tag (with force)
-          echo "Pushing major version tag: $major_tag"
+          # Push both tags
+          echo "📤 Pushing tags to remote..."
+          git push origin "$new_version"
           git push --force origin "$major_tag"
           
-          echo "✅ Successfully created and pushed tags: $new_version, $major_tag"
+          echo "✅ Successfully created and pushed tags:"
+          echo "  📌 Semantic version: $new_version (unique, permanent)"
+          echo "  🔄 Major version: $major_tag (moveable, points to latest)"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
