@@ -218,7 +218,7 @@ jobs:
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
 
       - name: Login to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
           registry: ${{ inputs.registry }}
           username: ${{ github.actor }}
@@ -226,13 +226,13 @@ jobs:
 
       - name: Install Cosign
         if: inputs.enable_cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
         with:
           cosign-release: 'v2.4.1'
 
       - name: Generate build metadata
         id: metadata
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         with:
           images: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}
           tags: |
@@ -256,7 +256,7 @@ jobs:
 
       - name: Build and push container
         id: build-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: ${{ matrix.container }}
           file: ${{ matrix.container }}/Dockerfile
@@ -271,7 +271,7 @@ jobs:
 
       - name: Generate artifact attestation
         if: inputs.enable_attestations
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}
           subject-digest: ${{ steps.build-push.outputs.digest }}
@@ -295,7 +295,7 @@ jobs:
           echo "✅ Container image signed successfully"
 
       - name: Run Trivy security scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # master
         with:
           image-ref: ${{ inputs.registry }}/${{ inputs.image_namespace }}/${{ matrix.app }}@${{ steps.build-push.outputs.digest }}
           format: 'sarif'
