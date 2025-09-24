@@ -90,7 +90,7 @@ jobs:
           
           # Determine version bump type using conventional commits
           bump_type="patch"  # Default
-          if [[ "$commit_message" =~ BREAKING.CHANGE ]] || [[ "$commit_message" =~ ^[^:]*!: ]]; then
+          if [[ "$commit_message" =~ BREAKING[[:space:]]CHANGE ]] || [[ "$commit_message" =~ ^[^:]*!: ]]; then
             bump_type="major"
             echo "::notice::Detected breaking change - major version bump"
           elif [[ "$commit_message" =~ ^feat(\(.*\))?: ]] || [[ "$commit_message" =~ ^add(\(.*\))?: ]]; then
@@ -152,6 +152,9 @@ jobs:
     needs: analyze-changes
     if: needs.analyze-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
@@ -177,10 +180,15 @@ jobs:
           
           echo "::group::Creating release tag"
           
-          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION - Updated workflows: $CHANGED_WORKFLOWS"
-          git push origin "$NEW_VERSION"
+          # Check if tag already exists
+          if git tag -l | grep -q "^$NEW_VERSION$"; then
+            echo "::warning::Tag $NEW_VERSION already exists, skipping tag creation"
+          else
+            git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION - Updated workflows: $CHANGED_WORKFLOWS"
+            git push origin "$NEW_VERSION"
+            echo "::notice::Created and pushed tag: $NEW_VERSION"
+          fi
           
-          echo "::notice::Created and pushed tag: $NEW_VERSION"
           echo "::endgroup::"
 
       - name: Generate release notes
@@ -224,64 +232,87 @@ jobs:
           # Add recent commits
           echo "### 📋 Changes in This Release" >> release_notes.md
           echo "" >> release_notes.md
-          git log --oneline --pretty=format:"- %s" "$LATEST_TAG"..HEAD | head -10 >> release_notes.md
-          echo "" >> release_notes.md
+          
+          # Handle case where LATEST_TAG might be v0.0.0 or empty
+          if [[ "$LATEST_TAG" == "v0.0.0" ]]; then
+            echo "- Initial release" >> release_notes.md
+          else
+            # Use git log with error handling
+            if git log --oneline --pretty=format:"- %s" "$LATEST_TAG"..HEAD | head -10 >> release_notes.md 2>/dev/null; then
+              echo "" >> release_notes.md
+            else
+              echo "- Updated workflows and configurations" >> release_notes.md
+            fi
+          fi
           echo "" >> release_notes.md
           
           # Analyze GitHub Actions updates
           echo "### 🔄 GitHub Actions Updates" >> release_notes.md
           echo "" >> release_notes.md
           
-          # Get action changes with improved parsing
-          if ! action_changes=$(git diff "$LATEST_TAG"..HEAD -- '.github/workflows/*.yml' | grep -E '^[-+].*uses:.*@' | sort -u); then
+          # Get action changes with improved parsing and error handling
+          set +e  # Temporarily disable exit on error for git diff
+          action_changes=$(git diff "$LATEST_TAG"..HEAD -- '.github/workflows/*.yml' | grep -E '^[-+].*uses:.*@' | sort -u)
+          diff_exit_code=$?
+          set -e  # Re-enable exit on error
+          
+          if [[ $diff_exit_code -ne 0 ]] || [[ -z "$action_changes" ]]; then
             echo "No GitHub Actions version changes in this release." >> release_notes.md
           else
             echo "The following GitHub Actions have been updated:" >> release_notes.md
             echo "" >> release_notes.md
             
-            # Process changes more efficiently
+            # Process changes more efficiently with error handling
             declare -A old_versions new_versions
             
             while IFS= read -r line; do
-              if [[ "$line" =~ ^-[[:space:]]*uses:[[:space:]]*([^@]+)@(.+) ]]; then
-                old_versions["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
-              elif [[ "$line" =~ ^+[[:space:]]*uses:[[:space:]]*([^@]+)@(.+) ]]; then
-                new_versions["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+              if [[ -n "$line" ]]; then
+                if [[ "$line" =~ ^-[[:space:]]*uses:[[:space:]]*([^@]+)@(.+) ]]; then
+                  old_versions["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+                elif [[ "$line" =~ ^+[[:space:]]*uses:[[:space:]]*([^@]+)@(.+) ]]; then
+                  new_versions["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+                fi
               fi
             done <<< "$action_changes"
             
-            # Generate action update details
-            for action in "${!new_versions[@]}"; do
-              if [[ -n "${old_versions[$action]:-}" ]]; then
-                old_ver="${old_versions[$action]}"
-                new_ver="${new_versions[$action]}"
-                
-                echo "#### 🏷️ \`$action\`" >> release_notes.md
-                echo "- **Previous:** \`$old_ver\`" >> release_notes.md  
-                echo "- **Current:** \`$new_ver\`" >> release_notes.md
-                
-                # Determine change type
-                if [[ "$old_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]] && [[ "$new_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-                  old_major=${BASH_REMATCH[1]} old_minor=${BASH_REMATCH[2]} old_patch=${BASH_REMATCH[3]}
-                  if [[ "$new_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-                    new_major=${BASH_REMATCH[1]} new_minor=${BASH_REMATCH[2]} new_patch=${BASH_REMATCH[3]}
-                    
-                    if [[ $new_major -gt $old_major ]]; then
-                      echo "- **Change Type:** 🚨 Major version update (potential breaking changes)" >> release_notes.md
-                    elif [[ $new_minor -gt $old_minor ]]; then
-                      echo "- **Change Type:** ✨ Minor version update (new features)" >> release_notes.md
-                    elif [[ $new_patch -gt $old_patch ]]; then
-                      echo "- **Change Type:** 🐛 Patch version update (bug fixes, security patches)" >> release_notes.md
+            # Generate action update details with error handling
+            if [[ ${#new_versions[@]} -gt 0 ]]; then
+              for action in "${!new_versions[@]}"; do
+                if [[ -n "${old_versions[$action]:-}" ]]; then
+                  old_ver="${old_versions[$action]}"
+                  new_ver="${new_versions[$action]}"
+                  
+                  echo "#### 🏷️ \`$action\`" >> release_notes.md
+                  echo "- **Previous:** \`$old_ver\`" >> release_notes.md  
+                  echo "- **Current:** \`$new_ver\`" >> release_notes.md
+                  
+                  # Determine change type with better error handling
+                  if [[ "$old_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+                    old_major=${BASH_REMATCH[1]} old_minor=${BASH_REMATCH[2]} old_patch=${BASH_REMATCH[3]}
+                    if [[ "$new_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+                      new_major=${BASH_REMATCH[1]} new_minor=${BASH_REMATCH[2]} new_patch=${BASH_REMATCH[3]}
+                      
+                      if [[ $new_major -gt $old_major ]]; then
+                        echo "- **Change Type:** 🚨 Major version update (potential breaking changes)" >> release_notes.md
+                      elif [[ $new_minor -gt $old_minor ]]; then
+                        echo "- **Change Type:** ✨ Minor version update (new features)" >> release_notes.md
+                      elif [[ $new_patch -gt $old_patch ]]; then
+                        echo "- **Change Type:** 🐛 Patch version update (bug fixes, security patches)" >> release_notes.md
+                      else
+                        echo "- **Change Type:** 🔄 Version update" >> release_notes.md
+                      fi
                     fi
                   fi
+                  
+                  # Add changelog link
+                  repo_path=$(echo "$action" | cut -d'/' -f1-2)
+                  echo "- **Details:** [View changelog](https://github.com/$repo_path/compare/$old_ver...$new_ver)" >> release_notes.md
+                  echo "" >> release_notes.md
                 fi
-                
-                # Add changelog link
-                repo_path=$(echo "$action" | cut -d'/' -f1-2)
-                echo "- **Details:** [View changelog](https://github.com/$repo_path/compare/$old_ver...$new_ver)" >> release_notes.md
-                echo "" >> release_notes.md
-              fi
-            done
+              done
+            else
+              echo "No action version changes detected in this release." >> release_notes.md
+            fi
           fi
           echo "" >> release_notes.md
           
