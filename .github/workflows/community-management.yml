@@ -190,7 +190,7 @@ jobs:
           # Only process items without recent activity
           ignore-updates: true # Only consider comments, not all updates
 
-          # Rate limiting to be respectful to GitHub API
+          # Rate limiting to be respectful to GitHub API 
           ascending: true # Process oldest items first
 
   # Summary job
