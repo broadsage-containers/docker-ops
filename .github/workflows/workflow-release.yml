@@ -35,8 +35,8 @@ jobs:
         run: |
           echo "Detecting workflow changes..."
           
-          # Get changed files in the reusable workflows directory
-          changed_files=$(git diff --name-only HEAD~1 HEAD -- .github/workflows/reusable/)
+          # Get changed files in the workflows directory (excluding this workflow and version-docs)
+          changed_files=$(git diff --name-only HEAD~1 HEAD -- .github/workflows/*.yml | grep -v -e "workflow-release.yml" -e "version-docs.yml" || true)
           
           if [[ -z "$changed_files" ]]; then
             echo "No workflow changes detected"
@@ -216,13 +216,13 @@ jobs:
           Update your workflow references to use this version:
           
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/reusable/{workflow}.yml@$version
+          uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@$version
           \`\`\`
           
           Or pin to the major version for automatic updates:
           
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/reusable/{workflow}.yml@${{ steps.version.outputs.major-tag }}
+          uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@${{ steps.version.outputs.major-tag }}
           \`\`\`
           
           ### Full Changelog
