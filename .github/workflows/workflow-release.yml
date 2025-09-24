@@ -288,15 +288,16 @@ jobs:
           echo "notes-file=release_notes.md" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.version.outputs.new-version }}
-          release_name: "Docker Operations Workflows ${{ steps.version.outputs.new-version }}"
+          name: "Docker Operations Workflows ${{ steps.version.outputs.new-version }}"
           body_path: ${{ steps.notes.outputs.notes-file }}
           draft: false
           prerelease: false
+          make_latest: true
 
   notify-consumers:
     needs: [detect-changes, create-unified-release]
