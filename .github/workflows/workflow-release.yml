@@ -205,112 +205,39 @@ jobs:
           bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
           is_dep_update="${{ needs.determine-version-bump.outputs.is-dependency-update }}"
           
-          # Create release notes
+          # Create clean, minimal release notes
           cat > release_notes.md << EOF
-          # 🚀 Docker Operations Workflows
+          ## What's Changed
           
-          > **Reusable GitHub Actions workflows for containerized application development and deployment**
+          Updated workflows: **$workflows**
           
-          ## 📖 About This Project
-          
-          This repository provides a comprehensive suite of reusable GitHub Actions workflows designed to streamline Docker-based development and operations. These workflows offer standardized, secure, and efficient CI/CD processes for containerized applications.
-          
-          ### 🎯 **Key Features:**
-          - **🔧 Automated Build & Validation** - Lint, test, and validate your Docker configurations
-          - **📦 Multi-Platform Builds** - Support for multiple architectures and platforms  
-          - **🔒 Security-First Approach** - Built-in security scanning and best practices
-          - **🚀 Easy Integration** - Drop-in workflows for any Docker-based project
-          - **📋 Standardized Processes** - Consistent CI/CD across all your repositories
-          
-          ## 📋 Release Summary
-          
-          | Field | Value |
-          |-------|-------|
-          | 🏷️ **Version** | \`$version\` |
-          | 📦 **Type** | \`$bump_type\` release |
-          | 🔧 **Workflows** | \`$workflows\` |
-          | 🤖 **Dependency Update** | \`$is_dep_update\` |
-          
-          ## ✨ What's Changed
-          
-          ### 🔄 Updated Workflows
           EOF
-          
-          # Add workflow-specific details with actual commit information
-          echo "" >> release_notes.md
-          echo "## 📝 What's Changed" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "📌 **Changes in this release:**" >> release_notes.md
-          echo "" >> release_notes.md
           
           # Get meaningful commits since last release with clickable links
           last_tag="${{ steps.latest.outputs.latest-tag }}"
           
-          # Get all commits since last release, formatted for users
+          # Get key changes, filtered and limited
           if [[ "$last_tag" != "v0.0.0" ]]; then
-            meaningful_commits=$(git log --oneline --format="format:- [**%h**](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" "$last_tag"..HEAD -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:" | head -10 || echo "")
+            key_commits=$(git log --oneline --format="format:* [%h](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" "$last_tag"..HEAD -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:|test:" | head -5 || echo "")
           else
-            meaningful_commits=$(git log --oneline --format="format:- [**%h**](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:" | head -10 || echo "")
+            key_commits=$(git log --oneline --format="format:* [%h](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:|test:" | head -5 || echo "")
           fi
           
-          if [[ -n "$meaningful_commits" ]]; then
-            echo "$meaningful_commits" >> release_notes.md
+          if [[ -n "$key_commits" ]]; then
+            echo "$key_commits" >> release_notes.md
           else
-            echo "- Minor updates and improvements to workflow reliability" >> release_notes.md
-          fi
-          
-          echo "" >> release_notes.md
-          echo "_💡 **Note**: This release includes updates to the following workflows: \`$workflows\`_" >> release_notes.md
-          
-          # Check for Action version updates
-          echo "" >> release_notes.md
-          echo "#### 🔧 GitHub Actions Updates:" >> release_notes.md
-          echo "" >> release_notes.md
-          
-          # Look for action version changes in the diff
-          action_changes=""
-          if git diff HEAD~1 HEAD -- .github/workflows/ >/dev/null 2>&1; then
-            action_changes=$(git diff HEAD~1 HEAD -- .github/workflows/ | grep -E "^[\+\-].*uses:" | head -10 || true)
-          fi
-          
-          if [[ -n "$action_changes" ]]; then
-            echo "Recent action version changes detected:" >> release_notes.md
-            echo "\`\`\`diff" >> release_notes.md
-            echo "$action_changes" >> release_notes.md
-            echo "\`\`\`" >> release_notes.md
-          else
-            echo "- No GitHub Action version changes detected in this release" >> release_notes.md
+            echo "* Minor improvements and bug fixes" >> release_notes.md
           fi
           
           cat >> release_notes.md << EOF
           
-          ## 📖 Usage Instructions
-          
-          ### 🎯 Pin to Specific Version (Recommended)
-          For **maximum stability** and **reproducible builds**:
+          ## Usage
           
           \`\`\`yaml
           uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@$version
           \`\`\`
           
-          ### 🔄 Auto-update with Major Version
-          For **automatic minor and patch updates**:
-          
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@${{ steps.version.outputs.major-tag }}
-          \`\`\`
-          
-          > 💡 **Tip:** Pin to specific versions in production environments for better stability
-          
-          ## 📚 Additional Resources
-          
-          - 📖 [Documentation](https://github.com/broadsage-containers/docker-ops/blob/main/README.md)
-          - 🔍 [Full Changelog](https://github.com/broadsage-containers/docker-ops/compare/${{ steps.latest.outputs.latest-tag }}...$version)
-          - 🐛 [Report Issues](https://github.com/broadsage-containers/docker-ops/issues)
-          
-          ---
-          
-          **🤖 This release was automatically generated by GitHub Actions**
+          [Full Changelog](https://github.com/broadsage-containers/docker-ops/compare/${{ steps.latest.outputs.latest-tag }}...$version)
           EOF
           
           echo "Generated release notes:"
