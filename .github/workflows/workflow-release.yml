@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 ---
-name: Workflow-Specific Release
+name: Workflow Release
 
 on:
   push:
@@ -17,302 +17,331 @@ permissions:
   contents: write
   pull-requests: read
 
+env:
+  # Global environment variables
+  HARDEN_RUNNER_VERSION: "v2.13.1"
+  CHECKOUT_VERSION: "v5.0.0" 
+  RELEASE_ACTION_VERSION: "v2.0.8"
+
 jobs:
-  detect-changes:
+  analyze-changes:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
-      changed-workflows: ${{ steps.changes.outputs.workflows }}
-      has-changes: ${{ steps.changes.outputs.has-changes }}
+      has-changes: ${{ steps.detection.outputs.has-changes }}
+      changed-workflows: ${{ steps.detection.outputs.changed-workflows }}
+      version-bump: ${{ steps.version-bump.outputs.bump-type }}
+      is-dependency-update: ${{ steps.version-bump.outputs.is-dependency-update }}
+      latest-tag: ${{ steps.version-info.outputs.latest-tag }}
+      new-version: ${{ steps.version-info.outputs.new-version }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
+      - name: Harden the runner
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
         with:
           egress-policy: audit
 
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          fetch-depth: 2
+          fetch-depth: 100  # Fetch enough history for version calculation
 
-      - name: Detect changed workflows
-        id: changes
+      - name: Detect workflow changes
+        id: detection
         run: |
-          echo "Detecting workflow changes..."
+          set -euo pipefail
           
-          # Get changed workflow files (exclude management workflows)
+          echo "::group::Detecting workflow changes"
+          
+          # Get changed workflow files, excluding management workflows
           changed_files=$(git diff --name-only HEAD~1 HEAD -- '.github/workflows/*.yml' | \
             grep -v -E '(workflow-release|version-docs)\.yml$' || true)
           
           if [[ -z "$changed_files" ]]; then
-            echo "No workflow changes detected"
-            echo "has-changes=false" >> $GITHUB_OUTPUT
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No workflow changes detected"
             exit 0
           fi
           
-          echo "Changed files:"
-          echo "$changed_files"
+          # Create workflow list
+          workflows=$(echo "$changed_files" | sed 's|.github/workflows/||g; s|\.yml$||g' | paste -sd, -)
           
-          # Create simple comma-separated list of workflow names
-          workflows=""
-          for file in $changed_files; do
-            if [[ $file == *.yml ]]; then
-              workflow_name=$(basename "$file" .yml)
-              if [[ -n "$workflows" ]]; then
-                workflows="$workflows, $workflow_name"
-              else
-                workflows="$workflow_name"
-              fi
-            fi
-          done
+          echo "has-changes=true" >> "$GITHUB_OUTPUT"
+          echo "changed-workflows=$workflows" >> "$GITHUB_OUTPUT"
           
-          echo "Changed workflows: $workflows"
-          echo "workflows=$workflows" >> $GITHUB_OUTPUT
-          echo "has-changes=true" >> $GITHUB_OUTPUT
+          echo "::notice::Changed workflows: $workflows"
+          echo "::endgroup::"
 
-  determine-version-bump:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      version-bump: ${{ steps.bump.outputs.bump-type }}
-      is-dependency-update: ${{ steps.check-deps.outputs.is-dependency-update }}
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 100
-
-      - name: Check if dependency update
-        id: check-deps
+      - name: Determine version bump and dependency status
+        id: version-bump
+        if: steps.detection.outputs.has-changes == 'true'
         run: |
-          # Check if this is a Dependabot PR or dependency-related commit
-          if [[ "${{ github.actor }}" == "dependabot[bot]" ]] || 
-             [[ "${{ github.event.head_commit.message }}" =~ ^deps(\(.*\))?: ]]; then
-            echo "is-dependency-update=true" >> $GITHUB_OUTPUT
-            echo "This is a dependency update"
-          else
-            echo "is-dependency-update=false" >> $GITHUB_OUTPUT
-            echo "This is not a dependency update"
-          fi
-
-      - name: Determine version bump type
-        id: bump
-        run: |
+          set -euo pipefail
+          
+          echo "::group::Analyzing commit for version bump"
+          
           commit_message="${{ github.event.head_commit.message }}"
-          message="$commit_message"
+          actor="${{ github.actor }}"
           
-          echo "Analyzing commit message: $message"
-          
-          # Check for breaking changes
-          if [[ "$message" =~ BREAKING.CHANGE ]] || 
-             [[ "$message" =~ ^[^:]*!: ]] ||
-             [[ "$message" =~ ^feat!: ]] ||
-             [[ "$message" =~ ^fix!: ]]; then
-            echo "bump-type=major" >> $GITHUB_OUTPUT
-            echo "Detected BREAKING CHANGE - major version bump"
-          # Check for new features
-          elif [[ "$message" =~ ^feat(\(.*\))?: ]] ||
-               [[ "$message" =~ ^add(\(.*\))?: ]]; then
-            echo "bump-type=minor" >> $GITHUB_OUTPUT
-            echo "Detected new feature - minor version bump"
-          # Everything else is patch (fixes, deps, docs, etc.)
-          else
-            echo "bump-type=patch" >> $GITHUB_OUTPUT
-            echo "Detected patch change - patch version bump"
+          # Check for dependency update
+          is_dep_update="false"
+          if [[ "$actor" == "dependabot[bot]" ]] || [[ "$commit_message" =~ ^deps(\(.*\))?: ]]; then
+            is_dep_update="true"
           fi
+          
+          # Determine version bump type using conventional commits
+          bump_type="patch"  # Default
+          if [[ "$commit_message" =~ BREAKING.CHANGE ]] || [[ "$commit_message" =~ ^[^:]*!: ]]; then
+            bump_type="major"
+            echo "::notice::Detected breaking change - major version bump"
+          elif [[ "$commit_message" =~ ^feat(\(.*\))?: ]] || [[ "$commit_message" =~ ^add(\(.*\))?: ]]; then
+            bump_type="minor"
+            echo "::notice::Detected new feature - minor version bump"
+          else
+            echo "::notice::Detected patch change - patch version bump"
+          fi
+          
+          echo "bump-type=$bump_type" >> "$GITHUB_OUTPUT"
+          echo "is-dependency-update=$is_dep_update" >> "$GITHUB_OUTPUT"
+          
+          echo "::endgroup::"
 
-  create-unified-release:
-    needs: [detect-changes, determine-version-bump]
-    if: needs.detect-changes.outputs.has-changes == 'true'
+      - name: Calculate version information
+        id: version-info
+        if: steps.detection.outputs.has-changes == 'true'
+        run: |
+          set -euo pipefail
+          
+          echo "::group::Calculating new version"
+          
+          # Get latest semantic version tag
+          latest_tag=$(git tag -l --sort=-version:refname | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | head -n1 || echo "v0.0.0")
+          echo "latest-tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "::notice::Latest tag: $latest_tag"
+          
+          # Parse current version
+          if [[ "$latest_tag" == "v0.0.0" ]]; then
+            major=0; minor=0; patch=0
+          else
+            version=${latest_tag#v}
+            IFS='.' read -r major minor patch <<< "$version"
+          fi
+          
+          # Calculate new version based on bump type
+          bump_type="${{ steps.version-bump.outputs.bump-type }}"
+          case "$bump_type" in
+            "major")
+              new_major=$((major + 1)); new_minor=0; new_patch=0 ;;
+            "minor") 
+              new_major=$major; new_minor=$((minor + 1)); new_patch=0 ;;
+            "patch")
+              new_major=$major; new_minor=$minor; new_patch=$((patch + 1)) ;;
+          esac
+          
+          # Handle first version
+          if [[ $major -eq 0 && $minor -eq 0 && $patch -eq 0 ]]; then
+            new_major=1; new_minor=0; new_patch=0
+          fi
+          
+          new_version="v$new_major.$new_minor.$new_patch"
+          echo "new-version=$new_version" >> "$GITHUB_OUTPUT"
+          echo "::notice::New version: $new_version"
+          
+          echo "::endgroup::"
+
+  create-release:
+    needs: analyze-changes
+    if: needs.analyze-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (Audit all outbound calls)
+      - name: Harden the runner
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
         with:
           egress-policy: audit
 
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Full history for release notes
 
-      - name: Setup Git
+      - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Get latest repository version
-        id: latest
+      - name: Create and push tag
+        env:
+          NEW_VERSION: ${{ needs.analyze-changes.outputs.new-version }}
+          CHANGED_WORKFLOWS: ${{ needs.analyze-changes.outputs.changed-workflows }}
         run: |
-          echo "Getting latest repository version..."
+          set -euo pipefail
           
-          # Get the latest tag for the entire repository (semantic versioning)
-          latest_tag=$(git tag -l --sort=-version:refname | grep "^v[0-9]*\.[0-9]*\.[0-9]*$" | head -n1 || echo "v0.0.0")
-          echo "latest-tag=$latest_tag" >> $GITHUB_OUTPUT
-          echo "Latest repository tag: $latest_tag"
+          echo "::group::Creating release tag"
+          
+          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION - Updated workflows: $CHANGED_WORKFLOWS"
+          git push origin "$NEW_VERSION"
+          
+          echo "::notice::Created and pushed tag: $NEW_VERSION"
+          echo "::endgroup::"
 
-      - name: Calculate new repository version
-        id: version
+      - name: Generate release notes
+        id: release-notes
+        env:
+          VERSION: ${{ needs.analyze-changes.outputs.new-version }}
+          BUMP_TYPE: ${{ needs.analyze-changes.outputs.version-bump }}
+          IS_DEP_UPDATE: ${{ needs.analyze-changes.outputs.is-dependency-update }}
+          CHANGED_WORKFLOWS: ${{ needs.analyze-changes.outputs.changed-workflows }}
+          LATEST_TAG: ${{ needs.analyze-changes.outputs.latest-tag }}
         run: |
-          latest_tag="${{ steps.latest.outputs.latest-tag }}"
-          bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
+          set -euo pipefail
           
-          # Extract version from tag (remove 'v' prefix)
-          if [[ "$latest_tag" == "v0.0.0" ]]; then
-            # First version for repository
-            version="0.0.0"
-          else
-            version=${latest_tag#v}
-          fi
+          echo "::group::Generating release notes"
           
-          # Split version
-          IFS='.' read -r major minor patch <<< "$version"
+          # Create release notes file
+          cat > release_notes.md << 'EOF'
+          ## What's Changed
           
-          # Default to 0 if parsing fails
-          major=${major:-0}
-          minor=${minor:-0}
-          patch=${patch:-0}
+          EOF
           
-          echo "Current repository version: $major.$minor.$patch"
-          echo "Bump type: $bump_type"
-          
-          # Calculate new version based on bump type
-          case $bump_type in
+          # Add version bump context with appropriate emoji and messaging
+          case "$BUMP_TYPE" in
             "major")
-              new_major=$((major + 1))
-              new_minor=0
-              new_patch=0
-              ;;
+              echo "🚨 **Breaking Changes** - Major version release with potential breaking changes." >> release_notes.md ;;
             "minor")
-              new_major=$major
-              new_minor=$((minor + 1))
-              new_patch=0
-              ;;
+              echo "✨ **New Features** - Minor version release with new functionality." >> release_notes.md ;;
             "patch")
-              new_major=$major
-              new_minor=$minor
-              new_patch=$((patch + 1))
-              ;;
+              echo "🐛 **Fixes & Improvements** - Patch release with bug fixes and improvements." >> release_notes.md ;;
           esac
+          echo "" >> release_notes.md
           
-          # For first version, start at 1.0.0
-          if [[ "$major" == "0" && "$minor" == "0" && "$patch" == "0" ]]; then
-            new_major=1
-            new_minor=0
-            new_patch=0
+          # List updated workflows
+          echo "### 📝 Updated Workflows" >> release_notes.md
+          echo "" >> release_notes.md
+          for workflow in ${CHANGED_WORKFLOWS//,/ }; do
+            echo "- \`${workflow// /}.yml\`" >> release_notes.md
+          done
+          echo "" >> release_notes.md
+          
+          # Add recent commits
+          echo "### 📋 Changes in This Release" >> release_notes.md
+          echo "" >> release_notes.md
+          git log --oneline --pretty=format:"- %s" "$LATEST_TAG"..HEAD | head -10 >> release_notes.md
+          echo "" >> release_notes.md
+          echo "" >> release_notes.md
+          
+          # Analyze GitHub Actions updates
+          echo "### 🔄 GitHub Actions Updates" >> release_notes.md
+          echo "" >> release_notes.md
+          
+          # Get action changes with improved parsing
+          if ! action_changes=$(git diff "$LATEST_TAG"..HEAD -- '.github/workflows/*.yml' | grep -E '^[-+].*uses:.*@' | sort -u); then
+            echo "No GitHub Actions version changes in this release." >> release_notes.md
+          else
+            echo "The following GitHub Actions have been updated:" >> release_notes.md
+            echo "" >> release_notes.md
+            
+            # Process changes more efficiently
+            declare -A old_versions new_versions
+            
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^-[[:space:]]*uses:[[:space:]]*([^@]+)@(.+) ]]; then
+                old_versions["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+              elif [[ "$line" =~ ^+[[:space:]]*uses:[[:space:]]*([^@]+)@(.+) ]]; then
+                new_versions["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+              fi
+            done <<< "$action_changes"
+            
+            # Generate action update details
+            for action in "${!new_versions[@]}"; do
+              if [[ -n "${old_versions[$action]:-}" ]]; then
+                old_ver="${old_versions[$action]}"
+                new_ver="${new_versions[$action]}"
+                
+                echo "#### 🏷️ \`$action\`" >> release_notes.md
+                echo "- **Previous:** \`$old_ver\`" >> release_notes.md  
+                echo "- **Current:** \`$new_ver\`" >> release_notes.md
+                
+                # Determine change type
+                if [[ "$old_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]] && [[ "$new_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+                  old_major=${BASH_REMATCH[1]} old_minor=${BASH_REMATCH[2]} old_patch=${BASH_REMATCH[3]}
+                  if [[ "$new_ver" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+                    new_major=${BASH_REMATCH[1]} new_minor=${BASH_REMATCH[2]} new_patch=${BASH_REMATCH[3]}
+                    
+                    if [[ $new_major -gt $old_major ]]; then
+                      echo "- **Change Type:** 🚨 Major version update (potential breaking changes)" >> release_notes.md
+                    elif [[ $new_minor -gt $old_minor ]]; then
+                      echo "- **Change Type:** ✨ Minor version update (new features)" >> release_notes.md
+                    elif [[ $new_patch -gt $old_patch ]]; then
+                      echo "- **Change Type:** 🐛 Patch version update (bug fixes, security patches)" >> release_notes.md
+                    fi
+                  fi
+                fi
+                
+                # Add changelog link
+                repo_path=$(echo "$action" | cut -d'/' -f1-2)
+                echo "- **Details:** [View changelog](https://github.com/$repo_path/compare/$old_ver...$new_ver)" >> release_notes.md
+                echo "" >> release_notes.md
+              fi
+            done
+          fi
+          echo "" >> release_notes.md
+          
+          # Add dependency update notice if applicable
+          if [[ "$IS_DEP_UPDATE" == "true" ]]; then
+            echo "### 🔄 Dependency Updates" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "This release includes automated dependency updates and security patches." >> release_notes.md
+            echo "" >> release_notes.md
           fi
           
-          new_version="v$new_major.$new_minor.$new_patch"
+          # Add usage instructions
+          cat >> release_notes.md << USAGE_EOF
+          ### 🚀 Usage
           
-          echo "new-version=$new_version" >> $GITHUB_OUTPUT
-          echo "New repository version will be: $new_version"
-
-      - name: Create and push repository tag
-        run: |
-          new_version="${{ steps.version.outputs.new-version }}"
-          changed_workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
-          
-          echo "Creating unified tag for repository..."
-          
-          # Create single specific version tag for the entire repository
-          git tag -a "$new_version" -m "Release $new_version - Updated workflows: $changed_workflows"
-          
-          # Push the tag
-          git push origin "$new_version"
-          
-          echo "Created and pushed repository tag: $new_version"
-
-      - name: Generate unified release notes
-        id: notes
-        run: |
-          version="${{ steps.version.outputs.new-version }}"
-          bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
-          is_dep_update="${{ needs.determine-version-bump.outputs.is-dependency-update }}"
-          changed_workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
-          
-          # Create unified release notes
-          cat > release_notes.md << EOF
-          ## Docker Operations Workflows $version
-          
-          **Version Bump:** $bump_type  
-          **Dependency Update:** $is_dep_update
-          **Updated Workflows:** $changed_workflows
-          
-          ### Changes
-          
-          This release includes updates to the following workflow files:
-          - $changed_workflows
-          
-          ### Improvements
-          
-          - Updated dependencies and security patches
-          - Enhanced functionality and bug fixes
-          - Improved performance and reliability
-          - Security hardening and best practices
-          
-          ### Usage
-          
-          Use workflows from this specific version for maximum stability:
+          Pin to this specific version for stability:
           
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/[workflow-name].yml@$version
+          uses: broadsage-containers/docker-ops/.github/workflows/[workflow-name].yml@$VERSION
           \`\`\`
           
-          Or use the main branch for latest updates (higher risk):
+          Or use the latest version (receives automatic updates):
           
           \`\`\`yaml
           uses: broadsage-containers/docker-ops/.github/workflows/[workflow-name].yml@main
           \`\`\`
           
-          ### Available Workflows
+          ### 📚 Available Workflows
           
-          - \`pr-build-validate.yml\` - Pull request validation and testing
-          - \`pr-build-publish.yml\` - Pull request build and publish
-          - \`quality-gate.yml\` - Code quality and security checks
-          - \`security-scorecard.yml\` - Security scorecard analysis
-          - \`dependency-review.yml\` - Dependency security review
-          - \`community-management.yml\` - Community management automation
+          | Workflow | Purpose |
+          |----------|---------|
+          | \`pr-build-validate.yml\` | Pull request validation and testing |
+          | \`pr-build-publish.yml\` | Build and publish container images |
+          | \`quality-gate.yml\` | Code quality and security analysis |
+          | \`security-scorecard.yml\` | OpenSSF security scorecard |
+          | \`dependency-review.yml\` | Dependency vulnerability scanning |
+          | \`community-management.yml\` | Community automation |
           
-          ### Full Changelog
+          **Full Changelog**: https://github.com/broadsage-containers/docker-ops/compare/$LATEST_TAG...$VERSION
+          USAGE_EOF
           
-          **Full Changelog**: https://github.com/broadsage-containers/docker-ops/compare/${{ steps.latest.outputs.latest-tag }}...$version
-          EOF
-          
-          echo "Generated unified release notes"
-          echo "notes-file=release_notes.md" >> $GITHUB_OUTPUT
+          echo "notes-file=release_notes.md" >> "$GITHUB_OUTPUT"
+          echo "::notice::Generated release notes"
+          echo "::endgroup::"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.version.outputs.new-version }}
-          name: ${{ steps.version.outputs.new-version }}
-          body_path: ${{ steps.notes.outputs.notes-file }}
+          tag_name: ${{ needs.analyze-changes.outputs.new-version }}
+          name: ${{ needs.analyze-changes.outputs.new-version }}
+          body_path: ${{ steps.release-notes.outputs.notes-file }}
           draft: false
           prerelease: false
           make_latest: true
 
-  notify-consumers:
-    needs: [detect-changes, create-unified-release]
-    if: needs.detect-changes.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
-        with:
-          egress-policy: audit
-
-      - name: Notify about release
+      - name: Log release completion
+        env:
+          VERSION: ${{ needs.analyze-changes.outputs.new-version }}
+          WORKFLOWS: ${{ needs.analyze-changes.outputs.changed-workflows }}
         run: |
-          workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
-          echo "🚀 New unified release created for workflows: $workflows"
-          echo "📝 Consuming repositories should consider updating their workflow references"
-          echo "🔒 For maximum stability, pin to specific versions (e.g., @v1.2.3)"
-          echo "⚡ For latest updates, use @main (higher risk but automatic updates)"
+          echo "::notice::🚀 Successfully created release $VERSION"
+          echo "::notice::📝 Updated workflows: $WORKFLOWS"
+          echo "::notice::🔗 View release at: https://github.com/broadsage-containers/docker-ops/releases/tag/$VERSION"
