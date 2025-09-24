@@ -34,9 +34,17 @@ jobs:
         id: changes
         run: |
           echo "Detecting workflow changes..."
+          echo "Commit range: HEAD~1..HEAD"
+          
+          # Debug: Show all changed files first
+          all_changed=$(git diff --name-only HEAD~1 HEAD || true)
+          echo "All changed files:"
+          echo "$all_changed"
+          echo "---"
           
           # Get changed files in the workflows directory (excluding this workflow and version-docs)
-          changed_files=$(git diff --name-only HEAD~1 HEAD -- .github/workflows/*.yml | grep -v -e "workflow-release.yml" -e "version-docs.yml" || true)
+          # Use more explicit path matching to ensure we catch all workflow files
+          changed_files=$(git diff --name-only HEAD~1 HEAD | grep "^\.github/workflows/.*\.yml$" | grep -v -e "workflow-release.yml" -e "version-docs.yml" || true)
           
           if [[ -z "$changed_files" ]]; then
             echo "No workflow changes detected"
@@ -44,14 +52,17 @@ jobs:
             exit 0
           fi
           
-          echo "Changed files:"
+          echo "Changed workflow files:"
           echo "$changed_files"
+          echo "---"
           
           # Extract workflow names (without .yml extension)
           workflows=""
           for file in $changed_files; do
+            echo "Processing file: $file"
             if [[ $file == *.yml ]]; then
               workflow_name=$(basename "$file" .yml)
+              echo "Extracted workflow name: $workflow_name"
               if [[ -n "$workflows" ]]; then
                 workflows="$workflows,$workflow_name"
               else
