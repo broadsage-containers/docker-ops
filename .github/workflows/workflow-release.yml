@@ -296,17 +296,36 @@ jobs:
           new_version="${{ steps.version.outputs.new-version }}"
           major_tag="${{ steps.version.outputs.major-tag }}"
           
-          # Create specific version tag
-          git tag -a "$new_version" -m "Release $new_version - workflow updates"
+          echo "Creating tags: $new_version, $major_tag"
           
-          # Update major version tag (force update)
+          # Check if specific version tag already exists
+          if git rev-parse "$new_version" >/dev/null 2>&1; then
+            echo "Tag $new_version already exists, skipping creation"
+          else
+            echo "Creating specific version tag: $new_version"
+            git tag -a "$new_version" -m "Release $new_version - workflow updates"
+          fi
+          
+          # Update major version tag (force update to handle existing tags)
+          echo "Creating/updating major version tag: $major_tag"
           git tag -f -a "$major_tag" -m "Major version $major_tag (latest: $new_version)"
           
-          # Push both tags
-          git push origin "$new_version"
+          # Push tags with better error handling
+          echo "Pushing tags..."
+          
+          # Push specific version tag only if it was created
+          if ! git rev-parse --verify "origin/$new_version" >/dev/null 2>&1; then
+            echo "Pushing specific version tag: $new_version"
+            git push origin "$new_version"
+          else
+            echo "Tag $new_version already exists on remote, skipping push"
+          fi
+          
+          # Always push major tag (with force)
+          echo "Pushing major version tag: $major_tag"
           git push --force origin "$major_tag"
           
-          echo "Created and pushed tags: $new_version, $major_tag"
+          echo "✅ Successfully created and pushed tags: $new_version, $major_tag"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
