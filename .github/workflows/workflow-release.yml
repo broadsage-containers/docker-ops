@@ -207,11 +207,52 @@ jobs:
           ### 🔄 Updated Workflows
           EOF
           
-          # Add workflow-specific details
+          # Add workflow-specific details with actual commit information
+          echo "" >> release_notes.md
+          echo "#### 📝 Detailed Changes:" >> release_notes.md
+          echo "" >> release_notes.md
+          
+          # Get actual commit messages for the changed workflows
           IFS=',' read -ra workflow_list <<< "$workflows"
           for workflow in "${workflow_list[@]}"; do
-            echo "- 🛠️ **\`$workflow.yml\`** - Enhanced with latest improvements and dependency updates" >> release_notes.md
+            echo "**🛠️ \`$workflow.yml\`**" >> release_notes.md
+            
+            # Get recent commits that modified this workflow
+            workflow_commits=$(git log --oneline --since="7 days ago" --format="format:- %s" -- ".github/workflows/$workflow.yml" | head -5)
+            
+            if [[ -n "$workflow_commits" ]]; then
+              echo "$workflow_commits" >> release_notes.md
+            else
+              echo "- Updated with latest improvements" >> release_notes.md
+            fi
+            echo "" >> release_notes.md
           done
+          
+          # Add overall commit summary
+          echo "#### 🔄 Recent Commits:" >> release_notes.md
+          echo "" >> release_notes.md
+          recent_commits=$(git log --oneline --since="7 days ago" --format="format:- \`%h\` %s" -- .github/workflows/ | head -10)
+          if [[ -n "$recent_commits" ]]; then
+            echo "$recent_commits" >> release_notes.md
+          else
+            echo "- No recent commits found" >> release_notes.md
+          fi
+          
+          # Check for Action version updates
+          echo "" >> release_notes.md
+          echo "#### 🔧 GitHub Actions Updates:" >> release_notes.md
+          echo "" >> release_notes.md
+          
+          # Look for action version changes in the diff
+          action_changes=$(git diff HEAD~1 HEAD -- .github/workflows/ | grep -E "^\+.*uses:|^\-.*uses:" | head -10 || echo "")
+          if [[ -n "$action_changes" ]]; then
+            echo "Recent action version changes detected:" >> release_notes.md
+            echo "\`\`\`diff" >> release_notes.md
+            echo "$action_changes" >> release_notes.md
+            echo "\`\`\`" >> release_notes.md
+          else
+            echo "- No GitHub Action version changes detected in this release" >> release_notes.md
+          fi
           
           cat >> release_notes.md << EOF
           
