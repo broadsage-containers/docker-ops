@@ -207,9 +207,20 @@ jobs:
           
           # Create release notes
           cat > release_notes.md << EOF
-          # 🚀 Release Changes
+          # 🚀 Docker Operations Workflows
           
-          > **Automated release of workflow updates**
+          > **Reusable GitHub Actions workflows for containerized application development and deployment**
+          
+          ## 📖 About This Project
+          
+          This repository provides a comprehensive suite of reusable GitHub Actions workflows designed to streamline Docker-based development and operations. These workflows offer standardized, secure, and efficient CI/CD processes for containerized applications.
+          
+          ### 🎯 **Key Features:**
+          - **🔧 Automated Build & Validation** - Lint, test, and validate your Docker configurations
+          - **📦 Multi-Platform Builds** - Support for multiple architectures and platforms  
+          - **🔒 Security-First Approach** - Built-in security scanning and best practices
+          - **🚀 Easy Integration** - Drop-in workflows for any Docker-based project
+          - **📋 Standardized Processes** - Consistent CI/CD across all your repositories
           
           ## 📋 Release Summary
           
@@ -227,48 +238,29 @@ jobs:
           
           # Add workflow-specific details with actual commit information
           echo "" >> release_notes.md
-          echo "#### 📝 Detailed Changes:" >> release_notes.md
+          echo "## 📝 What's Changed" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "📌 **Changes in this release:**" >> release_notes.md
           echo "" >> release_notes.md
           
-          # Get actual commit messages for the changed workflows since last release
+          # Get meaningful commits since last release with clickable links
           last_tag="${{ steps.latest.outputs.latest-tag }}"
-          echo "📌 Changes since last release (\`$last_tag\`):" >> release_notes.md
-          echo "" >> release_notes.md
           
-          IFS=',' read -ra workflow_list <<< "$workflows"
-          for workflow in "${workflow_list[@]}"; do
-            echo "**🛠️ \`$workflow.yml\`**" >> release_notes.md
-            
-            # Get commits that modified this workflow since the last release
-            if [[ "$last_tag" != "v0.0.0" ]]; then
-              workflow_commits=$(git log --oneline --format="format:- %s" "$last_tag"..HEAD -- ".github/workflows/$workflow.yml" || echo "")
-            else
-              # If no previous tag, get all commits for this workflow
-              workflow_commits=$(git log --oneline --format="format:- %s" -- ".github/workflows/$workflow.yml" | head -5 || echo "")
-            fi
-            
-            if [[ -n "$workflow_commits" ]]; then
-              echo "$workflow_commits" >> release_notes.md
-            else
-              echo "- No direct commits to this workflow file" >> release_notes.md
-            fi
-            echo "" >> release_notes.md
-          done
-          
-          # Add overall commit summary for this release
-          echo "#### 🔄 All Changes in This Release:" >> release_notes.md
-          echo "" >> release_notes.md
+          # Get all commits since last release, formatted for users
           if [[ "$last_tag" != "v0.0.0" ]]; then
-            all_commits=$(git log --oneline --format="format:- \`%h\` %s" "$last_tag"..HEAD -- .github/workflows/ || echo "")
+            meaningful_commits=$(git log --oneline --format="format:- [**%h**](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" "$last_tag"..HEAD -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:" | head -10 || echo "")
           else
-            all_commits=$(git log --oneline --format="format:- \`%h\` %s" -- .github/workflows/ | head -10 || echo "")
+            meaningful_commits=$(git log --oneline --format="format:- [**%h**](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:" | head -10 || echo "")
           fi
           
-          if [[ -n "$all_commits" ]]; then
-            echo "$all_commits" >> release_notes.md
+          if [[ -n "$meaningful_commits" ]]; then
+            echo "$meaningful_commits" >> release_notes.md
           else
-            echo "- No workflow commits in this release range" >> release_notes.md
+            echo "- Minor updates and improvements to workflow reliability" >> release_notes.md
           fi
+          
+          echo "" >> release_notes.md
+          echo "_💡 **Note**: This release includes updates to the following workflows: \`$workflows\`_" >> release_notes.md
           
           # Check for Action version updates
           echo "" >> release_notes.md
