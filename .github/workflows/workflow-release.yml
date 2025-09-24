@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed-workflows: ${{ steps.changes.outputs.workflows }}
-      changed-workflows-array: ${{ steps.changes.outputs.workflows-array }}
       has-changes: ${{ steps.changes.outputs.has-changes }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -54,36 +53,21 @@ jobs:
           echo "Changed files:"
           echo "$changed_files"
           
-          # Extract workflow names (without .yml extension)
+          # Create simple comma-separated list of workflow names
           workflows=""
-          workflows_array="["
-          first=true
-          
           for file in $changed_files; do
             if [[ $file == *.yml ]]; then
               workflow_name=$(basename "$file" .yml)
               if [[ -n "$workflows" ]]; then
-                workflows="$workflows,$workflow_name"
+                workflows="$workflows, $workflow_name"
               else
                 workflows="$workflow_name"
-              fi
-              
-              # Build JSON array for matrix
-              if [[ "$first" == "true" ]]; then
-                workflows_array="${workflows_array}\"$workflow_name\""
-                first=false
-              else
-                workflows_array="${workflows_array},\"$workflow_name\""
               fi
             fi
           done
           
-          workflows_array="${workflows_array}]"
-          
           echo "Changed workflows: $workflows"
-          echo "Changed workflows array: $workflows_array"
           echo "workflows=$workflows" >> $GITHUB_OUTPUT
-          echo "workflows-array=$workflows_array" >> $GITHUB_OUTPUT
           echo "has-changes=true" >> $GITHUB_OUTPUT
 
   determine-version-bump:
@@ -143,13 +127,10 @@ jobs:
             echo "Detected patch change - patch version bump"
           fi
 
-  create-workflow-releases:
+  create-unified-release:
     needs: [detect-changes, determine-version-bump]
     if: needs.detect-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        workflow: ${{ fromJson(needs.detect-changes.outputs.changed-workflows-array) }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
@@ -166,30 +147,28 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Get latest version for workflow
+      - name: Get latest repository version
         id: latest
         run: |
-          workflow="${{ matrix.workflow }}"
-          echo "Processing workflow: $workflow"
+          echo "Getting latest repository version..."
           
-          # Get the latest tag for this specific workflow
-          latest_tag=$(git tag -l --sort=-version:refname | grep "^${workflow}-v[0-9]*\.[0-9]*\.[0-9]*$" | head -n1 || echo "${workflow}-v0.0.0")
+          # Get the latest tag for the entire repository (semantic versioning)
+          latest_tag=$(git tag -l --sort=-version:refname | grep "^v[0-9]*\.[0-9]*\.[0-9]*$" | head -n1 || echo "v0.0.0")
           echo "latest-tag=$latest_tag" >> $GITHUB_OUTPUT
-          echo "Latest tag for $workflow: $latest_tag"
+          echo "Latest repository tag: $latest_tag"
 
-      - name: Calculate new version for workflow
+      - name: Calculate new repository version
         id: version
         run: |
-          workflow="${{ matrix.workflow }}"
           latest_tag="${{ steps.latest.outputs.latest-tag }}"
           bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
           
-          # Extract version from tag (remove workflow prefix and 'v')
-          if [[ "$latest_tag" == "${workflow}-v0.0.0" ]]; then
-            # First version for this workflow
+          # Extract version from tag (remove 'v' prefix)
+          if [[ "$latest_tag" == "v0.0.0" ]]; then
+            # First version for repository
             version="0.0.0"
           else
-            version=${latest_tag#${workflow}-v}
+            version=${latest_tag#v}
           fi
           
           # Split version
@@ -200,7 +179,7 @@ jobs:
           minor=${minor:-0}
           patch=${patch:-0}
           
-          echo "Current version for $workflow: $major.$minor.$patch"
+          echo "Current repository version: $major.$minor.$patch"
           echo "Bump type: $bump_type"
           
           # Calculate new version based on bump type
@@ -229,108 +208,98 @@ jobs:
             new_patch=0
           fi
           
-          new_version="${workflow}-v$new_major.$new_minor.$new_patch"
-          major_tag="${workflow}-v$new_major"
-          minor_tag="${workflow}-v$new_major.$new_minor"
+          new_version="v$new_major.$new_minor.$new_patch"
           
           echo "new-version=$new_version" >> $GITHUB_OUTPUT
-          echo "major-tag=$major_tag" >> $GITHUB_OUTPUT
-          echo "minor-tag=$minor_tag" >> $GITHUB_OUTPUT
-          echo "workflow=$workflow" >> $GITHUB_OUTPUT
-          
-          echo "New version for $workflow will be: $new_version"
-          echo "Major tag: $major_tag"
-          echo "Minor tag: $minor_tag"
+          echo "New repository version will be: $new_version"
 
-      - name: Create and push workflow tags
+      - name: Create and push repository tag
         run: |
-          workflow="${{ matrix.workflow }}"
           new_version="${{ steps.version.outputs.new-version }}"
-          major_tag="${{ steps.version.outputs.major-tag }}"
-          minor_tag="${{ steps.version.outputs.minor-tag }}"
+          changed_workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
           
-          echo "Creating tags for $workflow..."
+          echo "Creating unified tag for repository..."
           
-          # Create specific version tag
-          git tag -a "$new_version" -m "Release $new_version - $workflow workflow updates"
+          # Create single specific version tag for the entire repository
+          git tag -a "$new_version" -m "Release $new_version - Updated workflows: $changed_workflows"
           
-          # Update major version tag (force update)
-          git tag -f -a "$major_tag" -m "Major version $major_tag for $workflow (latest: $new_version)"
-          
-          # Update minor version tag (force update)
-          git tag -f -a "$minor_tag" -m "Minor version $minor_tag for $workflow (latest: $new_version)"
-          
-          # Push all tags
+          # Push the tag
           git push origin "$new_version"
-          git push --force origin "$major_tag"
-          git push --force origin "$minor_tag"
           
-          echo "Created and pushed tags for $workflow: $new_version, $major_tag, $minor_tag"
+          echo "Created and pushed repository tag: $new_version"
 
-      - name: Generate workflow-specific release notes
+      - name: Generate unified release notes
         id: notes
         run: |
-          workflow="${{ matrix.workflow }}"
           version="${{ steps.version.outputs.new-version }}"
           bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
           is_dep_update="${{ needs.determine-version-bump.outputs.is-dependency-update }}"
+          changed_workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
           
-          # Create release notes
-          cat > ${workflow}_release_notes.md << EOF
-          ## Workflow: $workflow.yml
+          # Create unified release notes
+          cat > release_notes.md << EOF
+          ## Docker Operations Workflows $version
           
           **Version Bump:** $bump_type  
           **Dependency Update:** $is_dep_update
+          **Updated Workflows:** $changed_workflows
           
           ### Changes
           
-          This release updates the \`$workflow.yml\` workflow with the following improvements:
+          This release includes updates to the following workflow files:
+          - $changed_workflows
+          
+          ### Improvements
           
           - Updated dependencies and security patches
           - Enhanced functionality and bug fixes
           - Improved performance and reliability
+          - Security hardening and best practices
           
           ### Usage
           
-          Use this specific workflow version:
+          Use workflows from this specific version for maximum stability:
           
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/$workflow.yml@$version
+          uses: broadsage-containers/docker-ops/.github/workflows/[workflow-name].yml@$version
           \`\`\`
           
-          Or pin to the major version for automatic compatible updates:
+          Or use the main branch for latest updates (higher risk):
           
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/$workflow.yml@${{ steps.version.outputs.major-tag }}
+          uses: broadsage-containers/docker-ops/.github/workflows/[workflow-name].yml@main
           \`\`\`
           
-          Or pin to the minor version for patch updates only:
+          ### Available Workflows
           
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/$workflow.yml@${{ steps.version.outputs.minor-tag }}
-          \`\`\`
+          - \`pr-build-validate.yml\` - Pull request validation and testing
+          - \`pr-build-publish.yml\` - Pull request build and publish
+          - \`quality-gate.yml\` - Code quality and security checks
+          - \`security-scorecard.yml\` - Security scorecard analysis
+          - \`dependency-review.yml\` - Dependency security review
+          - \`community-management.yml\` - Community management automation
           
           ### Full Changelog
           
           **Full Changelog**: https://github.com/broadsage-containers/docker-ops/compare/${{ steps.latest.outputs.latest-tag }}...$version
           EOF
           
-          echo "Generated release notes for $workflow"
-          echo "notes-file=${workflow}_release_notes.md" >> $GITHUB_OUTPUT
+          echo "Generated unified release notes"
+          echo "notes-file=release_notes.md" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release for workflow
+      - name: Create GitHub Release
         uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.version.outputs.new-version }}
-          release_name: ${{ steps.version.outputs.new-version }}
+          release_name: "Docker Operations Workflows ${{ steps.version.outputs.new-version }}"
           body_path: ${{ steps.notes.outputs.notes-file }}
           draft: false
           prerelease: false
 
   notify-consumers:
-    needs: [detect-changes, create-workflow-releases]
+    needs: [detect-changes, create-unified-release]
     if: needs.detect-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -342,6 +311,7 @@ jobs:
       - name: Notify about release
         run: |
           workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
-          echo "🚀 New release created for workflows: $workflows"
+          echo "🚀 New unified release created for workflows: $workflows"
           echo "📝 Consuming repositories should consider updating their workflow references"
-          echo "🔒 For maximum stability, pin to specific versions"
+          echo "🔒 For maximum stability, pin to specific versions (e.g., @v1.2.3)"
+          echo "⚡ For latest updates, use @main (higher risk but automatic updates)"
