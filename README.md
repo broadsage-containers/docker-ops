@@ -11,11 +11,11 @@ on: [push, pull_request]
 
 jobs:
   quality:
-    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v0.3.1
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v0.3.2
     secrets: inherit
     
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v0.3.1
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v0.3.2
     secrets: inherit
 ```
 

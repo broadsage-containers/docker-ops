@@ -2,7 +2,7 @@
 
 ## Current Release
 
-- **Latest Version**: v0.3.1
+- **Latest Version**: v0.3.2
 - **Major Version**: v0
 - **Release Date**: 2025-09-25
 
@@ -12,7 +12,7 @@
 Use specific semantic versions for production environments:
 
 ```yaml
-uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v0.3.1
+uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v0.3.2
 ```
 
 ### 🚀 Latest Features
@@ -34,4 +34,4 @@ uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v0
 - [README](README.md) - Getting started guide
 
 ---
-*Generated automatically on 2025-09-25 10:57:53 UTC from release v0.3.1*
+*Generated automatically on 2025-09-25 11:28:51 UTC from release v0.3.2*
