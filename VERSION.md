@@ -31,7 +31,7 @@ uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v0
 
 ## Documentation
 
-- [README](README.md) - Getting started guide
+- [README](docs/README.md) - Getting started guide
 
 ---
 *Generated automatically on 2025-09-25 11:28:51 UTC from release v0.3.2*

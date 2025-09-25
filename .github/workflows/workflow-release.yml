@@ -309,6 +309,7 @@ jobs:
           ## Usage Recommendations
           
           ### 🏆 Production (Recommended)
+
           Use specific semantic versions for production environments:
           
           ```yaml
@@ -316,6 +317,7 @@ jobs:
           ```
           
           ### 🚀 Latest Features
+          
           Use major version tag for latest features (updates automatically):
           
           ```yaml
