@@ -328,24 +328,21 @@ jobs:
 
       - name: Update README examples
         run: |
-          echo "� Updating version references in README.md..."
+          echo "🔄 Updating version references in README.md..."
           
           # Update README.md examples to use the latest specific version
-          # Replace @v1.0.0 style versions with the new version
+          # Only replace full semantic versions (v1.2.3) to avoid double replacement
           sed -i.bak "s|@v[0-9]\+\.[0-9]\+\.[0-9]\+|@${{ steps.version.outputs.latest }}|g" README.md
-          
-          # Also handle any remaining @v1 style references
-          sed -i.bak2 "s|@v[0-9]\+|@${{ steps.version.outputs.latest }}|g" README.md
           
           # Show changes
           if ! cmp -s README.md README.md.bak; then
             echo "📝 Changes made to README.md:"
             diff README.md.bak README.md || true
-            rm -f README.md.bak README.md.bak2
+            rm -f README.md.bak
             echo "updated=true" >> $GITHUB_OUTPUT
           else
             echo "ℹ️  No changes needed in README.md"
-            rm -f README.md.bak README.md.bak2
+            rm -f README.md.bak
             echo "updated=false" >> $GITHUB_OUTPUT
           fi
 
