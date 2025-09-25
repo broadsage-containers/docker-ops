@@ -2,53 +2,36 @@
 
 ## Current Release
 
-- **Latest Version**: v0.3.0
+- **Latest Version**: v0.3.1
 - **Major Version**: v0
 - **Release Date**: 2025-09-25
 
 ## Usage Recommendations
 
 ### 🏆 Production (Recommended)
-
-Pin to exact versions for maximum stability:
-
-```yaml
-uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v0.3.0
-uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v0.3.0
-uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v0.3.0
-```
-
-### ⚡ Development
-
-Use main branch for latest features (higher risk):
+Use specific semantic versions for production environments:
 
 ```yaml
-uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
-uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@main
-uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@main
+uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v0.3.1
 ```
 
-## Available Versions
+### 🚀 Latest Features
+Use major version tag for latest features (updates automatically):
 
-### Recent Releases
-
-```text
-v0.3.0
-v0.2.6
-v0.2.5
-v0.2.4
-v0.2.3
-v0.2.2
-v0.2.1
-v0.2.0
-v0.1.7
-v0.1.6
+```yaml
+uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v0
 ```
 
-## Resources
+## Available Workflows
 
-- [Releases](https://github.com/broadsage-containers/docker-ops/releases) - Full changelog and release notes
+- **dependency-review** - Automated dependency vulnerability scanning
+- **quality-gate** - Code quality analysis and linting  
+- **version-docs** - Manual version documentation updates
+- **workflow-release** - Automated workflow versioning and releases
+
+## Documentation
+
 - [README](README.md) - Getting started guide
 
 ---
-*Generated automatically on 2025-09-25 10:29:40 UTC from release v0.3.0*
+*Generated automatically on 2025-09-25 10:57:53 UTC from release v0.3.1*
