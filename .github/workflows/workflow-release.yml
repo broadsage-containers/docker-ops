@@ -411,8 +411,8 @@ jobs:
           
           if [[ -n "$(git status --porcelain)" ]]; then
             echo "📝 Committing documentation updates..."
-            git add VERSION.md
-            git commit -m "docs: update VERSION.md to ${{ steps.version.outputs.latest }} [skip ci]"
+            git add README.md VERSION.md
+            git commit -m "docs: update version references to ${{ steps.version.outputs.latest }} [skip ci]"
             echo "🚀 Pushing changes to repository..."
             git push
             echo "✅ Version documentation updated successfully"
