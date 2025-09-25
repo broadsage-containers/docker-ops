@@ -8,6 +8,10 @@ name: Version Documentation
 on:
   release:
     types: [published, released]
+  workflow_run:
+    workflows: ["Workflow-Specific Release"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -23,6 +27,8 @@ jobs:
   update-version-docs:
     name: Update Version References
     runs-on: ubuntu-latest
+    # Only run if manually triggered, on release events, or if the workflow_run was successful
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
@@ -121,22 +127,9 @@ jobs:
           $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10)
           \`\`\`
           
-          ## Migration Guide
-          
-          If you were using the old per-workflow versioning:
-          
-          \`\`\`yaml
-          # ❌ OLD (no longer supported)
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@quality-gate-v1.2.3
-          
-          # ✅ NEW (unified versioning)  
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.latest }}
-          \`\`\`
-          
           ## Resources
           
           - [Releases](https://github.com/broadsage-containers/docker-ops/releases) - Full changelog and release notes
-          - [Workflow Versioning Strategy](WORKFLOW_VERSIONING.md) - Detailed versioning approach
           - [README](README.md) - Getting started guide
           
           ---
