@@ -20,13 +20,11 @@ on:
     paths:
       - '.github/workflows/*.yml'
       - '!.github/workflows/workflow-release.yml'
-      - '!.github/workflows/version-docs.yml'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/*.yml'
       - '!.github/workflows/workflow-release.yml'
-      - '!.github/workflows/version-docs.yml'
     types: [closed]
 
 # Global environment for consistency
@@ -317,7 +315,7 @@ jobs:
           ```
           
           ### 🚀 Latest Features
-          
+
           Use major version tag for latest features (updates automatically):
           
           ```yaml
