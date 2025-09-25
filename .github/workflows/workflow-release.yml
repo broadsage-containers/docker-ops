@@ -16,6 +16,7 @@ on:
 permissions:
   contents: write
   pull-requests: read
+  actions: write
 
 jobs:
   detect-changes:
@@ -308,6 +309,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Ensure we have the latest changes from the release job
+          echo "🔄 Fetching latest changes from remote..."
+          git fetch origin
+          git reset --hard origin/main
+          
+          echo "📍 Current git status:"
+          git status
+          git log --oneline -3
 
       - name: Update documentation versions
         run: |
@@ -472,7 +482,7 @@ jobs:
             git commit -m "docs: update version references to $NEW_VERSION [skip ci]" -m "Updated $FILES_UPDATED documentation files with latest version references" -m "Generated VERSION.md with release information"
             
             echo "🚀 Pushing documentation updates..."
-            if git push; then
+            if git push origin HEAD:main; then
               echo "✅ Documentation updated successfully"
             else
               echo "❌ Failed to push documentation updates"
@@ -480,6 +490,8 @@ jobs:
               git status
               echo "Git remote:"
               git remote -v
+              echo "Git branch info:"
+              git branch -a
               exit 1
             fi
           else
