@@ -5,18 +5,15 @@
 ---
 name: Version Documentation
 
+# NOTE: This workflow is primarily for manual documentation updates.
+# Automatic version updates happen in workflow-release.yml when releases are created.
+
 on:
-  release:
-    types: [published, released]
-  workflow_run:
-    workflows: ["Workflow-Specific Release"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to use for documentation update'
-        required: false
+        required: true
         type: string
 
 permissions:
@@ -25,10 +22,8 @@ permissions:
 
 jobs:
   update-version-docs:
-    name: Update Version References
+    name: Manual Version Documentation Update
     runs-on: ubuntu-latest
-    # Only run if manually triggered, on release events, or if the workflow_run was successful
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
@@ -41,103 +36,83 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Get latest version
-        id: version
+      - name: Validate version input
         run: |
-          # Use manual input version if provided, otherwise get latest from releases/tags
-          if [[ -n "${{ inputs.version }}" ]]; then
-            LATEST_VERSION="${{ inputs.version }}"
-            echo "Using manual version: $LATEST_VERSION"
-          elif [[ "${{ github.event_name }}" == "release" ]]; then
-            LATEST_VERSION="${{ github.event.release.tag_name }}"
-            echo "Using release version: $LATEST_VERSION"
-          else
-            # Fallback to latest tag
-            LATEST_VERSION=$(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
-            echo "Using latest tag: $LATEST_VERSION"
+          VERSION="${{ inputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: v1.2.3"
+            exit 1
+          fi
+          echo "✅ Version format is valid: $VERSION"
+
+      - name: Update documentation versions
+        run: |
+          echo "🔄 Updating version references in documentation files..."
+          
+          # Get the version from input
+          NEW_VERSION="${{ inputs.version }}"
+          echo "Updating docs to version: $NEW_VERSION"
+          
+          # Function to update version references in a file
+          update_file_versions() {
+            local file="$1"
+            if [[ ! -f "$file" ]]; then
+              return 0
+            fi
+            
+            echo "📄 Updating version references in $file..."
+            
+            # Create backup
+            cp "$file" "$file.bak"
+            
+            # Update specific workflow references
+            for workflow in quality-gate security-scorecard dependency-review pr-build-validate pr-build-publish community-management workflow-release version-docs; do
+              sed -i "s|broadsage-containers/docker-ops/\.github/workflows/${workflow}\.yml@v[0-9]\+\.[0-9]\+\.[0-9]\+|broadsage-containers/docker-ops/.github/workflows/${workflow}.yml@${NEW_VERSION}|g" "$file"
+              sed -i "s|broadsage-containers/docker-ops/\.github/workflows/${workflow}\.yml@v[0-9]\+|broadsage-containers/docker-ops/.github/workflows/${workflow}.yml@${NEW_VERSION}|g" "$file"
+            done
+            
+            # Generic fallback patterns
+            sed -i "s|@v[0-9]\+\.[0-9]\+\.[0-9]\+|@${NEW_VERSION}|g" "$file"
+            sed -i "s|@v[0-9]\+|@${NEW_VERSION}|g" "$file"
+            
+            # Check if file was changed
+            if ! cmp -s "$file" "$file.bak"; then
+              echo "✅ Updated version references in $file"
+              rm -f "$file.bak"
+              return 1  # File was updated
+            else
+              echo "ℹ️  No changes needed in $file"
+              rm -f "$file.bak"
+              return 0  # File was not updated
+            fi
+          }
+          
+          # Update files
+          FILES_UPDATED=0
+          
+          # Update README.md
+          if update_file_versions "README.md"; then
+            ((FILES_UPDATED++))
           fi
           
-          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          # Update other documentation files if they exist
+          DOC_FILES=(
+            "docs/README.md"
+            "docs/USAGE.md"
+            "docs/EXAMPLES.md"
+            ".github/PULL_REQUEST_TEMPLATE.md"
+            "CONTRIBUTING.md"
+            "examples/README.md"
+          )
           
-          # Extract major version (v1.2.3 -> v1)
-          MAJOR_VERSION=$(echo $LATEST_VERSION | cut -d. -f1)
-          echo "major=$MAJOR_VERSION" >> $GITHUB_OUTPUT
+          for doc_file in "${DOC_FILES[@]}"; do
+            if update_file_versions "$doc_file"; then
+              ((FILES_UPDATED++))
+            fi
+          done
           
-          echo "✅ Latest version: $LATEST_VERSION"
-          echo "✅ Major version: $MAJOR_VERSION"
-
-      - name: Update README examples
-        run: |
-          echo "🔄 Updating version references in README.md..."
-          
-          # Update README.md examples to use the latest specific version
-          # Replace @v1.0.0 style versions with the new version
-          sed -i.bak "s|@v[0-9]\+\.[0-9]\+\.[0-9]\+|@${{ steps.version.outputs.latest }}|g" README.md
-          
-          # Also handle any remaining @v1 style references
-          sed -i.bak2 "s|@v[0-9]\+|@${{ steps.version.outputs.latest }}|g" README.md
-          
-          # Show changes
-          if ! cmp -s README.md README.md.bak; then
-            echo "📝 Changes made to README.md:"
-            diff README.md.bak README.md || true
-            rm -f README.md.bak README.md.bak2
-            echo "updated=true" >> $GITHUB_OUTPUT
-          else
-            echo "ℹ️  No changes needed in README.md"
-            rm -f README.md.bak README.md.bak2
-            echo "updated=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create version file
-        id: version-file
-        run: |
-          echo "📄 Creating VERSION.md documentation..."
-          cat << EOF > VERSION.md
-          # Version Information
-          
-          ## Current Release
-          
-          - **Latest Version**: ${{ steps.version.outputs.latest }}
-          - **Major Version**: ${{ steps.version.outputs.major }}
-          - **Release Date**: $(date -u '+%Y-%m-%d')
-          
-          ## Usage Recommendations
-          
-          ### 🏆 Production (Recommended)
-          Pin to exact versions for maximum stability:
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.latest }}
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@${{ steps.version.outputs.latest }}
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@${{ steps.version.outputs.latest }}
-          \`\`\`
-          
-          ### ⚡ Development
-          Use main branch for latest features (higher risk):
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@main
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@main
-          \`\`\`
-          
-          ## Available Versions
-          
-          ### Recent Releases
-          \`\`\`
-          $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10)
-          \`\`\`
-          
-          ## Resources
-          
-          - [Releases](https://github.com/broadsage-containers/docker-ops/releases) - Full changelog and release notes
-          - [README](README.md) - Getting started guide
-          
-          ---
-          *Generated automatically on $(date -u '+%Y-%m-%d %H:%M:%S UTC') from release ${{ steps.version.outputs.latest }}*
-          EOF
-          
-          echo "✅ VERSION.md created successfully"
-          echo "version-file-created=true" >> $GITHUB_OUTPUT
+          echo "📊 Total files updated: $FILES_UPDATED"
 
       - name: Commit changes
         run: |
@@ -146,11 +121,11 @@ jobs:
           
           if [[ -n "$(git status --porcelain)" ]]; then
             echo "📝 Committing documentation updates..."
-            git add README.md VERSION.md
-            git commit -m "docs: update version references to ${{ steps.version.outputs.latest }} [skip ci]"
+            git add -A
+            git commit -m "docs: manual update version references to ${{ inputs.version }} [skip ci]"
             echo "🚀 Pushing changes to repository..."
             git push
-            echo "✅ Version documentation updated successfully"
+            echo "✅ Manual version documentation update completed successfully"
           else
             echo "ℹ️  No documentation changes needed"
           fi

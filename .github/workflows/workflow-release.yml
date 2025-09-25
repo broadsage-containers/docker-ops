@@ -128,6 +128,9 @@ jobs:
     needs: [detect-changes, determine-version-bump]
     if: needs.detect-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.version.outputs.new-version }}
+      major-version: ${{ steps.version.outputs.major-version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -285,8 +288,169 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  notify-consumers:
+  update-documentation:
     needs: [detect-changes, create-release]
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update documentation versions
+        run: |
+          echo "🔄 Updating version references in documentation files..."
+          
+          # Get the new version from create-release job
+          NEW_VERSION="${{ needs.create-release.outputs.new-version }}"
+          echo "Updating docs to version: $NEW_VERSION"
+          
+          # Function to update version references in a file
+          update_file_versions() {
+            local file="$1"
+            if [[ ! -f "$file" ]]; then
+              return 0
+            fi
+            
+            echo "📄 Updating version references in $file..."
+            
+            # Create backup
+            cp "$file" "$file.bak"
+            
+            # Update specific workflow references
+            for workflow in quality-gate security-scorecard dependency-review pr-build-validate pr-build-publish community-management workflow-release version-docs; do
+              sed -i "s|broadsage-containers/docker-ops/\.github/workflows/${workflow}\.yml@v[0-9]\+\.[0-9]\+\.[0-9]\+|broadsage-containers/docker-ops/.github/workflows/${workflow}.yml@${NEW_VERSION}|g" "$file"
+              sed -i "s|broadsage-containers/docker-ops/\.github/workflows/${workflow}\.yml@v[0-9]\+|broadsage-containers/docker-ops/.github/workflows/${workflow}.yml@${NEW_VERSION}|g" "$file"
+            done
+            
+            # Generic fallback patterns
+            sed -i "s|@v[0-9]\+\.[0-9]\+\.[0-9]\+|@${NEW_VERSION}|g" "$file"
+            sed -i "s|@v[0-9]\+|@${NEW_VERSION}|g" "$file"
+            
+            # Check if file was changed
+            if ! cmp -s "$file" "$file.bak"; then
+              echo "✅ Updated version references in $file"
+              rm -f "$file.bak"
+              return 1  # File was updated
+            else
+              echo "ℹ️  No changes needed in $file"
+              rm -f "$file.bak"
+              return 0  # File was not updated
+            fi
+          }
+          
+          # Update README.md
+          FILES_UPDATED=0
+          if update_file_versions "README.md"; then
+            ((FILES_UPDATED++))
+          fi
+          
+          # Update other documentation files if they exist
+          DOC_FILES=(
+            "docs/README.md"
+            "docs/USAGE.md"
+            "docs/EXAMPLES.md"
+            ".github/PULL_REQUEST_TEMPLATE.md"
+            "CONTRIBUTING.md"
+            "examples/README.md"
+          )
+          
+          for doc_file in "${DOC_FILES[@]}"; do
+            if update_file_versions "$doc_file"; then
+              ((FILES_UPDATED++))
+            fi
+          done
+          
+          # Create/update VERSION.md
+          echo "📄 Creating VERSION.md documentation..."
+          MAJOR_VERSION=$(echo $NEW_VERSION | cut -d. -f1)
+          
+          cat > VERSION.md << 'EOF'
+          # Version Information
+          
+          ## Current Release
+          
+          - **Latest Version**: NEW_VERSION_PLACEHOLDER
+          - **Major Version**: MAJOR_VERSION_PLACEHOLDER
+          - **Release Date**: DATE_PLACEHOLDER
+          
+          ## Usage Recommendations
+          
+          ### 🏆 Production (Recommended)
+          Pin to exact versions for maximum stability:
+          ```yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@NEW_VERSION_PLACEHOLDER
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@NEW_VERSION_PLACEHOLDER
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@NEW_VERSION_PLACEHOLDER
+          ```
+          
+          ### ⚡ Development
+          Use main branch for latest features (higher risk):
+          ```yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@main
+          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@main
+          ```
+          
+          ## Available Versions
+          
+          ### Recent Releases
+          ```
+          RECENT_RELEASES_PLACEHOLDER
+          ```
+          
+          ## Resources
+          
+          - [Releases](https://github.com/broadsage-containers/docker-ops/releases) - Full changelog and release notes
+          - [README](README.md) - Getting started guide
+          
+          ---
+          *Generated automatically on DATETIME_PLACEHOLDER from release NEW_VERSION_PLACEHOLDER*
+          EOF
+          
+          # Replace placeholders in VERSION.md
+          sed -i "s|NEW_VERSION_PLACEHOLDER|${NEW_VERSION}|g" VERSION.md
+          sed -i "s|MAJOR_VERSION_PLACEHOLDER|${MAJOR_VERSION}|g" VERSION.md
+          sed -i "s|DATE_PLACEHOLDER|$(date -u '+%Y-%m-%d')|g" VERSION.md
+          sed -i "s|DATETIME_PLACEHOLDER|$(date -u '+%Y-%m-%d %H:%M:%S UTC')|g" VERSION.md
+          
+          # Add recent releases
+          RECENT_RELEASES=$(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10 | tr '\n' '\n')
+          sed -i "s|RECENT_RELEASES_PLACEHOLDER|${RECENT_RELEASES}|g" VERSION.md
+          
+          echo "✅ VERSION.md created/updated"
+          ((FILES_UPDATED++))
+          
+          # Commit documentation updates
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "📝 Committing documentation updates..."
+            git add README.md VERSION.md
+            
+            # Add any other updated documentation files
+            for doc_file in "${DOC_FILES[@]}"; do
+              if [[ -f "$doc_file" ]] && ! git diff --quiet HEAD "$doc_file" 2>/dev/null; then
+                echo "📄 Adding updated $doc_file"
+                git add "$doc_file"
+              fi
+            done
+            
+            git commit -m "docs: update version references to $NEW_VERSION [skip ci]" -m "Updated $FILES_UPDATED documentation files with latest version references" -m "Generated VERSION.md with release information"
+            
+            echo "🚀 Pushing documentation updates..."
+            git push
+            echo "✅ Documentation updated successfully"
+          else
+            echo "ℹ️  No documentation changes to commit"
+          fi
+
+  notify-consumers:
+    needs: [detect-changes, create-release, update-documentation]
     if: needs.detect-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
     steps:
