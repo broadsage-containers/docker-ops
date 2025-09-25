@@ -2,13 +2,15 @@
 
 Centralized GitHub Actions workflows for **Docker Container** operations across all Broadsage Container repositories.
 
-> **Latest Version**: Check [Releases](https://github.com/broadsage-containers/docker-ops/releases) for the most recent updates.
+> **📋 Version Information**: See [VERSION.md](VERSION.md) for current versions and usage recommendations.
 
 ## 🚀 Quick Start
 
 ### Using in Your Repository
 
 Add one of these workflow files to your repository's `.github/workflows/` directory:
+
+> **⚠️ Important**: Replace `@VERSION` with the actual version from [VERSION.md](VERSION.md) or use `@main` for latest (less stable).
 
 #### Basic Container CI/CD
 
@@ -23,22 +25,22 @@ on:
 
 jobs:
   quality-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@VERSION
     secrets: inherit
 
   security-scan:
-    uses: broadsage-containers/docker-ops/.github/workflows/security-scorecard.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/security-scorecard.yml@VERSION
     permissions:
       security-events: write
       contents: read
       actions: read
 
   dependency-check:
-    uses: broadsage-containers/docker-ops/.github/workflows/dependency-review.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/dependency-review.yml@VERSION
     secrets: inherit
 
   build-validate:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@VERSION
     with:
       push_image: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     secrets: inherit
@@ -46,7 +48,7 @@ jobs:
   publish:
     needs: [quality-check, security-scan, build-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@VERSION
     with:
       enable_cosign: true
       enable_attestations: true
@@ -65,7 +67,7 @@ on:
 
 jobs:
   community-management:
-    uses: broadsage-containers/docker-ops/.github/workflows/community-management.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/community-management.yml@VERSION
     with:
       days_before_stale: 60
       days_before_close: 7
@@ -87,15 +89,17 @@ jobs:
 
 All workflows come with **sensible defaults** for enterprise use. Most repositories can use workflows without any configuration:
 
+> **📋 Version Reference**: Check [VERSION.md](VERSION.md) for current version numbers to replace `@VERSION` below.
+
 ```yaml
 # Minimal configuration - uses all defaults
 jobs:
   quality:
-    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@VERSION
     secrets: inherit
     
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@VERSION
     secrets: inherit
 ```
 
@@ -107,7 +111,7 @@ Override only the settings that differ from defaults:
 # Custom configuration - override specific settings
 jobs:
   build:
-    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@0.1.6
+    uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@VERSION
     with:
       build_platforms: "linux/amd64"        # Override: single platform
       timeout_minutes: 120                  # Override: longer timeout

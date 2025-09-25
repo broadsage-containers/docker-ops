@@ -9,7 +9,9 @@
 ## Usage Recommendations
 
 ### 🏆 Production (Recommended)
+
 Pin to exact versions for maximum stability:
+
 ```yaml
 uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v0.2.4
 uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v0.2.4
@@ -17,7 +19,9 @@ uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v0.
 ```
 
 ### ⚡ Development
+
 Use main branch for latest features (higher risk):
+
 ```yaml
 uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
 uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@main
@@ -27,7 +31,8 @@ uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@mai
 ## Available Versions
 
 ### Recent Releases
-```
+
+```text
 v0.2.4
 v0.2.3
 v0.2.2
