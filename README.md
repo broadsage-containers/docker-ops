@@ -2,6 +2,8 @@
 
 Centralized GitHub Actions workflows for **Docker Container** operations across all Broadsage Container repositories.
 
+> **Latest Version**: Check [Releases](https://github.com/broadsage-containers/docker-ops/releases) for the most recent updates.
+
 ## 🚀 Quick Start
 
 ### Using in Your Repository
