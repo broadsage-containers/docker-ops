@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 ---
-name: Pull Request Validation 
+name: Pull Request Validation
 
 on:
   workflow_call:
