@@ -2,7 +2,7 @@
 
 ## Current Release
 
-- **Latest Version**: v0.2.6
+- **Latest Version**: v0.3.0
 - **Major Version**: v0
 - **Release Date**: 2025-09-25
 
@@ -13,9 +13,9 @@
 Pin to exact versions for maximum stability:
 
 ```yaml
-uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v0.2.6
-uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v0.2.6
-uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v0.2.6
+uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@v0.3.0
+uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@v0.3.0
+uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@v0.3.0
 ```
 
 ### ⚡ Development
@@ -33,6 +33,7 @@ uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@mai
 ### Recent Releases
 
 ```text
+v0.3.0
 v0.2.6
 v0.2.5
 v0.2.4
@@ -42,7 +43,6 @@ v0.2.1
 v0.2.0
 v0.1.7
 v0.1.6
-v0.1.5
 ```
 
 ## Resources
@@ -51,4 +51,4 @@ v0.1.5
 - [README](README.md) - Getting started guide
 
 ---
-*Generated automatically on 2025-09-25 10:20:15 UTC from release v0.2.6*
+*Generated automatically on 2025-09-25 10:29:40 UTC from release v0.3.0*
