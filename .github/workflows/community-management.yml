@@ -79,7 +79,7 @@ jobs:
   # Handle solved issues - close them immediately
   close-solved-issues:
     runs-on: ubuntu-latest
-    name: Close solved issues
+    name: Close Solved Issues
     if: inputs.enable_solved_issues
     permissions:
       issues: write
@@ -107,7 +107,7 @@ jobs:
   # Handle stale issues and PRs
   stale-management:
     runs-on: ubuntu-latest
-    name: Manage stale issues and PRs
+    name: Stale Management
     if: inputs.enable_stale_management
     outputs:
       stale-issues-processed: ${{ steps.stale.outputs.stale-issues-processed }}
@@ -196,7 +196,7 @@ jobs:
   # Summary job
   community-summary:
     runs-on: ubuntu-latest
-    name: Community Management Summary 
+    name: Summary
     permissions:
       contents: read
     needs: [close-solved-issues, stale-management]
