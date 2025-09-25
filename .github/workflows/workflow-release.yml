@@ -194,12 +194,15 @@ jobs:
           
           new_version="v$new_major.$new_minor.$new_patch"
           major_tag="v$new_major"
+          major_version="v$new_major"
           
           echo "new-version=$new_version" >> $GITHUB_OUTPUT
           echo "major-tag=$major_tag" >> $GITHUB_OUTPUT
+          echo "major-version=$major_version" >> $GITHUB_OUTPUT
           
           echo "New version will be: $new_version"
           echo "Major tag: $major_tag"
+          echo "Major version: $major_version"
       - name: Generate release notes
         id: notes
         run: |
@@ -337,11 +340,11 @@ jobs:
             if ! cmp -s "$file" "$file.bak"; then
               echo "✅ Updated version references in $file"
               rm -f "$file.bak"
-              return 1  # File was updated
+              return 0  # File was updated (success)
             else
               echo "ℹ️  No changes needed in $file"
               rm -f "$file.bak"
-              return 0  # File was not updated
+              return 1  # File was not updated (failure)
             fi
           }
           
