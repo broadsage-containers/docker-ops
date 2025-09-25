@@ -1,9 +1,18 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 Broadsage Corporation <containers@broadsage.com>
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# This workflow detects changes to workflow files and creates releases with version documentation.
+# 
+# Features:
+# - Automatic semantic versioning based on commit messages
+# - Consolidated git setup and checkout patterns for performance  
+# - Robust Python-based version replacement preventing corruption
+# - Minimal dependencies and optimized job execution
+# - Comprehensive error handling and validation
 
 ---
-name: Workflow-Specific Release
+name: "Release Workflows"
 
 on:
   push:
@@ -12,40 +21,60 @@ on:
       - '.github/workflows/*.yml'
       - '!.github/workflows/workflow-release.yml'
       - '!.github/workflows/version-docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/*.yml'
+      - '!.github/workflows/workflow-release.yml'
+      - '!.github/workflows/version-docs.yml'
+    types: [closed]
+
+# Global environment for consistency
+env:
+  GIT_USER_NAME: "github-actions[bot]"
+  GIT_USER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
 
 permissions:
-  contents: write
-  pull-requests: read
-  actions: write
+  contents: read
 
 jobs:
-  detect-changes:
-    if: github.event_name == 'push'
+  # Detect workflow changes and determine version bump in single job for efficiency
+  analyze-changes:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     outputs:
-      changed-workflows: ${{ steps.changes.outputs.workflows }}
-      has-changes: ${{ steps.changes.outputs.has-changes }}
+      has-changes: ${{ steps.detect.outputs.has-changes }}
+      changed-workflows: ${{ steps.detect.outputs.workflows }}
+      version-bump: ${{ steps.version.outputs.bump-type }}
+      is-dependency-update: ${{ steps.version.outputs.is-dependency-update }}
+    permissions:
+      contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          fetch-depth: 2
-
-      - name: Detect changed workflows
-        id: changes
+          fetch-depth: 100 # Optimized - only need recent history for version determination
+          
+      - name: Setup git configuration
         run: |
-          echo "Detecting workflow changes..."
-          echo "Commit range: HEAD~1..HEAD"
+          git config --global user.name "${{ env.GIT_USER_NAME }}"
+          git config --global user.email "${{ env.GIT_USER_EMAIL }}"
+
+      - name: Detect workflow changes
+        id: detect
+        run: |
+          echo "🔍 Detecting changes in workflow files..."
           
-          # Debug: Show all changed files first
-          all_changed=$(git diff --name-only HEAD~1 HEAD || true)
-          echo "All changed files:"
-          echo "$all_changed"
-          echo "---"
-          
-          # Get changed files in the workflows directory (excluding this workflow and version-docs)
-          # Use more explicit path matching to ensure we catch all workflow files
-          changed_files=$(git diff --name-only HEAD~1 HEAD | grep "^\.github/workflows/.*\.yml$" | grep -v -e "workflow-release.yml" -e "version-docs.yml" || true)
+          # Get changed files in .github/workflows/ directory
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # For merged PRs, compare against base branch
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            changed_files=$(git diff --name-only "$base_sha" "$head_sha" -- .github/workflows/ | grep '\.yml$' || echo "")
+          else
+            # For direct pushes, compare with previous commit
+            changed_files=$(git diff --name-only HEAD~1 HEAD -- .github/workflows/ | grep '\.yml$' || echo "")
+          fi
           
           if [[ -z "$changed_files" ]]; then
             echo "No workflow changes detected"
@@ -53,166 +82,110 @@ jobs:
             exit 0
           fi
           
-          echo "Changed workflow files:"
-          echo "$changed_files"
-          echo "---"
+          echo "Changed workflow files: $changed_files"
           
-          # Extract workflow names (without .yml extension)
-          workflows=""
-          for file in $changed_files; do
-            echo "Processing file: $file"
-            if [[ $file == *.yml ]]; then
-              workflow_name=$(basename "$file" .yml)
-              echo "Extracted workflow name: $workflow_name"
-              if [[ -n "$workflows" ]]; then
-                workflows="$workflows,$workflow_name"
-              else
-                workflows="$workflow_name"
-              fi
-            fi
-          done
+          # Extract workflow names efficiently with single loop
+          workflows=$(echo "$changed_files" | sed 's|.github/workflows/||g' | sed 's|\.yml$||g' | paste -sd ',')
           
           echo "Changed workflows: $workflows"
           echo "workflows=$workflows" >> $GITHUB_OUTPUT
           echo "has-changes=true" >> $GITHUB_OUTPUT
-  determine-version-bump:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      version-bump: ${{ steps.bump.outputs.bump-type }}
-      is-dependency-update: ${{ steps.check-deps.outputs.is-dependency-update }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 100
 
-      - name: Check if dependency update
-        id: check-deps
-        run: |
-          # Check if this is a Dependabot PR or dependency-related commit
-          if [[ "${{ github.actor }}" == "dependabot[bot]" ]] || 
-             [[ "${{ github.event.head_commit.message }}" =~ ^deps(\(.*\))?: ]]; then
-            echo "is-dependency-update=true" >> $GITHUB_OUTPUT
-            echo "This is a dependency update"
-          else
-            echo "is-dependency-update=false" >> $GITHUB_OUTPUT
-            echo "This is not a dependency update"
-          fi
-      - name: Determine version bump type
-        id: bump
-        run: |
-          commit_message="${{ github.event.head_commit.message }}"
-          message="$commit_message"
-          
-          echo "Analyzing commit message: $message"
-          
-          # Check for breaking changes
-          if [[ "$message" =~ BREAKING.CHANGE ]] || 
-             [[ "$message" =~ ^[^:]*!: ]] ||
-             [[ "$message" =~ ^feat!: ]] ||
-             [[ "$message" =~ ^fix!: ]]; then
-            echo "bump-type=major" >> $GITHUB_OUTPUT
-            echo "Detected BREAKING CHANGE - major version bump"
-          # Check for new features
-          elif [[ "$message" =~ ^feat(\(.*\))?: ]] ||
-               [[ "$message" =~ ^add(\(.*\))?: ]]; then
-            echo "bump-type=minor" >> $GITHUB_OUTPUT
-            echo "Detected new feature - minor version bump"
-          # Everything else is patch (fixes, deps, docs, etc.)
-          else
-            echo "bump-type=patch" >> $GITHUB_OUTPUT
-            echo "Detected patch change - patch version bump"
-          fi
-  create-release:
-    needs: [detect-changes, determine-version-bump]
-    if: needs.detect-changes.outputs.has-changes == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      new-version: ${{ steps.version.outputs.new-version }}
-      major-version: ${{ steps.version.outputs.major-version }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Get latest version
-        id: latest
-        run: |
-          # Get the latest semantic version tag (sorted properly)
-          latest_tag=$(git tag -l "v*" | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n1 || echo "v0.0.0")
-          echo "latest-tag=$latest_tag" >> $GITHUB_OUTPUT
-          echo "Current latest tag: $latest_tag"
-          
-          # Verify this tag exists and is reachable
-          if [[ "$latest_tag" != "v0.0.0" ]] && ! git rev-parse --verify "$latest_tag" >/dev/null 2>&1; then
-            echo "Warning: Latest tag $latest_tag not found, falling back to v0.0.0"
-            latest_tag="v0.0.0"
-            echo "latest-tag=$latest_tag" >> $GITHUB_OUTPUT
-          fi
-      - name: Calculate new version
+      - name: Determine version bump and dependency status  
         id: version
         run: |
-          latest_tag="${{ steps.latest.outputs.latest-tag }}"
-          bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
+          commit_message="${{ github.event.head_commit.message }}"
+          actor="${{ github.actor }}"
           
-          # Remove 'v' prefix and split version
-          version=${latest_tag#v}
-          IFS='.' read -r major minor patch <<< "$version"
+          echo "Analyzing commit: $commit_message"
+          echo "Actor: $actor"
           
-          # Default to 0 if parsing fails
-          major=${major:-0}
-          minor=${minor:-0}
-          patch=${patch:-0}
+          # Check dependency update status
+          if [[ "$actor" == "dependabot[bot]" ]] || 
+             [[ "$commit_message" =~ ^deps(\(.*\))?: ]]; then
+            echo "is-dependency-update=true" >> $GITHUB_OUTPUT
+            echo "🔧 Dependency update detected"
+          else
+            echo "is-dependency-update=false" >> $GITHUB_OUTPUT
+          fi
           
-          echo "Current version: $major.$minor.$patch"
-          echo "Bump type: $bump_type"
+          # Determine version bump type with optimized regex matching
+          if [[ "$commit_message" =~ BREAKING.CHANGE ]] || 
+             [[ "$commit_message" =~ ^[^:]*!: ]] ||
+             [[ "$commit_message" =~ ^(feat|fix)!: ]]; then
+            bump_type="major"
+            echo "🚨 BREAKING CHANGE detected - major version bump"
+          elif [[ "$commit_message" =~ ^(feat|add)(\(.*\))?: ]]; then
+            bump_type="minor"
+            echo "✨ Feature detected - minor version bump"  
+          else
+            bump_type="patch"
+            echo "🐛 Patch change detected - patch version bump"
+          fi
           
-          # Calculate new version based on bump type
+          echo "bump-type=$bump_type" >> $GITHUB_OUTPUT
+
+  # Create release with optimized version calculation
+  create-release:
+    needs: analyze-changes
+    if: needs.analyze-changes.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.release.outputs.new-version }}
+      major-version: ${{ steps.release.outputs.major-version }}
+    permissions:
+      contents: write # Required for creating tags and releases
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0 # Full history required for version calculation
+          
+      - name: Setup git configuration  
+        run: |
+          git config --global user.name "${{ env.GIT_USER_NAME }}"
+          git config --global user.email "${{ env.GIT_USER_EMAIL }}"
+
+      - name: Calculate version and create release
+        id: release
+        run: |
+          bump_type="${{ needs.analyze-changes.outputs.version-bump }}"
+          workflows="${{ needs.analyze-changes.outputs.changed-workflows }}"
+          
+          # Get latest semantic version with improved sorting
+          latest_tag=$(git tag -l "v*.*.*" | sort -V | tail -n1 || echo "v0.0.0")
+          echo "Current latest: $latest_tag"
+          
+          # Parse current version with error handling
+          if [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]} 
+            patch=${BASH_REMATCH[3]}
+          else
+            echo "Invalid or missing version, starting from v0.0.0"
+            major=0; minor=0; patch=0
+          fi
+          
+          # Calculate new version using arithmetic expansion for performance
           case $bump_type in
-            "major")
-              new_major=$((major + 1))
-              new_minor=0
-              new_patch=0
-              ;;
-            "minor")
-              new_major=$major
-              new_minor=$((minor + 1))
-              new_patch=0
-              ;;
-            "patch")
-              new_major=$major
-              new_minor=$minor
-              new_patch=$((patch + 1))
-              ;;
+            "major") new_major=$((major + 1)); new_minor=0; new_patch=0 ;;
+            "minor") new_major=$major; new_minor=$((minor + 1)); new_patch=0 ;;
+            "patch") new_major=$major; new_minor=$minor; new_patch=$((patch + 1)) ;;
           esac
           
           new_version="v$new_major.$new_minor.$new_patch"
-          major_tag="v$new_major"
           major_version="v$new_major"
           
-          echo "new-version=$new_version" >> $GITHUB_OUTPUT
-          echo "major-tag=$major_tag" >> $GITHUB_OUTPUT
-          echo "major-version=$major_version" >> $GITHUB_OUTPUT
-          
-          echo "New version will be: $new_version"
-          echo "Major tag: $major_tag"
+          echo "New version: $new_version"
           echo "Major version: $major_version"
-      - name: Generate release notes
-        id: notes
-        run: |
-          workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
-          version="${{ steps.version.outputs.new-version }}"
-          bump_type="${{ needs.determine-version-bump.outputs.version-bump }}"
-          is_dep_update="${{ needs.determine-version-bump.outputs.is-dependency-update }}"
           
-          # Create clean, minimal release notes
+          # Validate version doesn't exist
+          if git rev-parse --verify "$new_version" >/dev/null 2>&1; then
+            echo "❌ Version $new_version already exists!"
+            exit 1
+          fi
+          
+          # Generate optimized release notes
           cat > release_notes.md << EOF
           ## What's Changed
           
@@ -220,20 +193,14 @@ jobs:
           
           EOF
           
-          # Get meaningful commits since last release with clickable links
-          last_tag="${{ steps.latest.outputs.latest-tag }}"
-          
-          # Get key changes, filtered and limited
-          if [[ "$last_tag" != "v0.0.0" ]]; then
-            key_commits=$(git log --oneline --format="format:* [%h](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" "$last_tag"..HEAD -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:|test:" | head -5 || echo "")
+          # Get key commits since last release (limited for performance)
+          if [[ "$latest_tag" != "v0.0.0" ]]; then
+            git log --oneline --format="* [%h](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" \
+              "$latest_tag"..HEAD -- .github/workflows/ | \
+              grep -v -E "^[*] [a-f0-9]+ (chore|docs|style|refactor|test):" | \
+              head -5 >> release_notes.md || echo "* Minor improvements and bug fixes" >> release_notes.md
           else
-            key_commits=$(git log --oneline --format="format:* [%h](https://github.com/broadsage-containers/docker-ops/commit/%H) %s" -- .github/workflows/ | grep -v -E "chore:|docs:|style:|refactor:|test:" | head -5 || echo "")
-          fi
-          
-          if [[ -n "$key_commits" ]]; then
-            echo "$key_commits" >> release_notes.md
-          else
-            echo "* Minor improvements and bug fixes" >> release_notes.md
+            echo "* Initial workflow release" >> release_notes.md
           fi
           
           cat >> release_notes.md << EOF
@@ -241,216 +208,194 @@ jobs:
           ## Usage
           
           \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@$version
+          uses: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@$new_version
           \`\`\`
           
-          [Full Changelog](https://github.com/broadsage-containers/docker-ops/compare/${{ steps.latest.outputs.latest-tag }}...$version)
+          [Full Changelog](https://github.com/broadsage-containers/docker-ops/compare/$latest_tag...$new_version)
           EOF
           
-          echo "Generated release notes:"
-          cat release_notes.md
-      - name: Create and push tags
-        run: |
-          new_version="${{ steps.version.outputs.new-version }}"
-          major_tag="${{ steps.version.outputs.major-tag }}"
-          
-          echo "Creating semantic version tags: $new_version, $major_tag"
-          
-          # Semantic versions should be unique - if it exists, something is wrong
-          if git rev-parse --verify "$new_version" >/dev/null 2>&1; then
-            echo "❌ ERROR: Semantic version tag $new_version already exists!"
-            echo "This indicates an issue with version calculation logic."
-            echo "Expected: Each semantic version should be unique"
-            git tag -l "v*" | sort -V | tail -5
-            exit 1
-          fi
-          
-          # Create the unique semantic version tag
-          echo "✅ Creating semantic version tag: $new_version"
+          # Create tags atomically
+          echo "🏷️ Creating tags..."
           git tag -a "$new_version" -m "Release $new_version - workflow updates"
+          git tag -f -a "$major_version" -m "Major version $major_version (latest: $new_version)"
           
-          # Update major version tag (this one can be moved/updated)
-          echo "🔄 Updating major version tag: $major_tag"
-          git tag -f -a "$major_tag" -m "Major version $major_tag (latest: $new_version)"
-          
-          # Push both tags
-          echo "📤 Pushing tags to remote..."
+          # Push tags
           git push origin "$new_version"
-          git push --force origin "$major_tag"
+          git push --force origin "$major_version"
           
-          echo "✅ Successfully created and pushed tags:"
-          echo "  📌 Semantic version: $new_version (unique, permanent)"
-          echo "  🔄 Major version: $major_tag (moveable, points to latest)"
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.new-version }}
-          name: Release ${{ steps.version.outputs.new-version }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: false
+          echo "new-version=$new_version" >> $GITHUB_OUTPUT
+          echo "major-version=$major_version" >> $GITHUB_OUTPUT
+          
+          # Create GitHub release
+          gh release create "$new_version" \
+            --title "Release $new_version" \
+            --notes-file release_notes.md \
+            --latest
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Update documentation with consolidated Python script
   update-documentation:
     name: Update Version References
-    needs: [detect-changes, create-release]
-    if: needs.detect-changes.outputs.has-changes == 'true'
+    needs: [analyze-changes, create-release]
+    if: needs.analyze-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for committing documentation updates
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Get latest version
-        id: version
+          fetch-depth: 1 # Shallow clone sufficient for doc updates
+          
+      - name: Setup git configuration
         run: |
-          # Get the new version from create-release job
-          LATEST_VERSION="${{ needs.create-release.outputs.new-version }}"
-          echo "Using version from create-release job: $LATEST_VERSION"
-          
-          # Validate that we have a version
-          if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
-            echo "❌ ERROR: No version received from create-release job!"
-            exit 1
-          fi
-          
-          echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
-          
-          # Extract major version (v1.2.3 -> v1)
-          MAJOR_VERSION=$(echo $LATEST_VERSION | cut -d. -f1)
-          echo "major=$MAJOR_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "✅ Latest version: $LATEST_VERSION"
-          echo "✅ Major version: $MAJOR_VERSION"
+          git config --local user.name "${{ env.GIT_USER_NAME }}"
+          git config --local user.email "${{ env.GIT_USER_EMAIL }}"
 
-      - name: Update README examples
+      - name: Update version references
         run: |
-          echo "🔄 Updating version references in README.md..."
+          new_version="${{ needs.create-release.outputs.new-version }}"
+          major_version="${{ needs.create-release.outputs.major-version }}"
           
-          # Use Python for robust version replacement
-          python3 << 'EOF'
+          echo "🔄 Updating documentation with version: $new_version"
+          
+          # Consolidated Python script for all version updates
+          python3 << 'PYTHON_EOF'
           import re
-          import sys
+          import os
+          from datetime import datetime
           
-          # Read current README
-          with open('README.md', 'r') as f:
-              content = f.read()
+          new_version = os.environ['NEW_VERSION']
+          major_version = os.environ['MAJOR_VERSION']
           
-          # Get new version from environment
-          new_version = "${{ steps.version.outputs.latest }}"
-          print(f"Updating to version: {new_version}")
+          print(f"Updating to: {new_version} (major: {major_version})")
           
-          # Pattern to match: broadsage-containers/docker-ops/.github/workflows/{workflow}.yml@v{version}
-          pattern = r'(broadsage-containers/docker-ops/\.github/workflows/[^@]+)@v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)*'
-          replacement = rf'\1@{new_version}'
+          # Version reference pattern - more precise to prevent corruption
+          version_pattern = r'(broadsage-containers/docker-ops/\.github/workflows/[^@\s]+)@v[0-9]+(?:\.[0-9]+){1,2}(?!\.[0-9])'
           
-          # Count matches before replacement
-          matches = re.findall(pattern, content)
-          print(f"Found {len(matches)} version references to update")
+          files_updated = 0
           
-          # Replace all matches
-          new_content = re.sub(pattern, replacement, content)
+          # Update README.md
+          try:
+              with open('README.md', 'r') as f:
+                  content = f.read()
+              
+              matches = len(re.findall(version_pattern, content))
+              if matches > 0:
+                  new_content = re.sub(version_pattern, rf'\1@{new_version}', content)
+                  
+                  with open('README.md', 'w') as f:
+                      f.write(new_content)
+                  
+                  print(f"✅ README.md: Updated {matches} references")
+                  files_updated += 1
+              else:
+                  print("ℹ️  README.md: No version references found")
+                  
+          except Exception as e:
+              print(f"❌ README.md update failed: {e}")
           
-          # Write back if changed
-          if content != new_content:
-              with open('README.md', 'w') as f:
-                  f.write(new_content)
-              print("✅ README.md updated successfully")
-              print("updated=true", file=open("updated_flag.txt", "w"))
-          else:
-              print("ℹ️  No changes needed in README.md")
-              print("updated=false", file=open("updated_flag.txt", "w"))
-          EOF
-          
-          # Set output based on Python result
-          if [[ -f "updated_flag.txt" ]]; then
-            flag=$(cat updated_flag.txt)
-            echo "$flag" >> $GITHUB_OUTPUT
-            rm -f updated_flag.txt
-          fi
-
-      - name: Create version file
-        id: version-file
-        run: |
-          echo "📄 Creating VERSION.md documentation..."
-          cat << EOF > VERSION.md
-          # Version Information
+          # Generate VERSION.md
+          try:
+              version_content = f"""# Version Information
           
           ## Current Release
           
-          - **Latest Version**: ${{ steps.version.outputs.latest }}
-          - **Major Version**: ${{ steps.version.outputs.major }}
-          - **Release Date**: $(date -u '+%Y-%m-%d')
+          - **Latest Version**: {new_version}
+          - **Major Version**: {major_version}
+          - **Release Date**: {datetime.utcnow().strftime('%Y-%m-%d')}
           
           ## Usage Recommendations
           
           ### 🏆 Production (Recommended)
-
-          Pin to exact versions for maximum stability:
-
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@${{ steps.version.outputs.latest }}
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@${{ steps.version.outputs.latest }}
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@${{ steps.version.outputs.latest }}
-          \`\`\`
+          Use specific semantic versions for production environments:
           
-          ### ⚡ Development
-
-          Use main branch for latest features (higher risk):
-
-          \`\`\`yaml
-          uses: broadsage-containers/docker-ops/.github/workflows/quality-gate.yml@main
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-validate.yml@main
-          uses: broadsage-containers/docker-ops/.github/workflows/pr-build-publish.yml@main
-          \`\`\`
+          ```yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/{{workflow}}.yml@{new_version}
+          ```
           
-          ## Available Versions
+          ### 🚀 Latest Features
+          Use major version tag for latest features (updates automatically):
           
-          ### Recent Releases
-
-          \`\`\`text
-          $(git tag -l --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10)
-          \`\`\`
+          ```yaml
+          uses: broadsage-containers/docker-ops/.github/workflows/{{workflow}}.yml@{major_version}
+          ```
           
-          ## Resources
+          ## Available Workflows
           
-          - [Releases](https://github.com/broadsage-containers/docker-ops/releases) - Full changelog and release notes
+          - **dependency-review** - Automated dependency vulnerability scanning
+          - **quality-gate** - Code quality analysis and linting  
+          - **version-docs** - Manual version documentation updates
+          - **workflow-release** - Automated workflow versioning and releases
+          
+          ## Documentation
+          
           - [README](README.md) - Getting started guide
           
           ---
-          *Generated automatically on $(date -u '+%Y-%m-%d %H:%M:%S UTC') from release ${{ steps.version.outputs.latest }}*
-          EOF
+          *Generated automatically on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')} from release {new_version}*
+          """
+              
+              with open('VERSION.md', 'w') as f:
+                  f.write(version_content)
+              
+              print("✅ VERSION.md: Created successfully")
+              files_updated += 1
+              
+          except Exception as e:
+              print(f"❌ VERSION.md creation failed: {e}")
           
-          echo "✅ VERSION.md created successfully"
-          echo "version-file-created=true" >> $GITHUB_OUTPUT
+          print(f"📊 Total files updated: {files_updated}")
+          
+          # Write update flag for shell script
+          with open('update_flag.txt', 'w') as f:
+              f.write('true' if files_updated > 0 else 'false')
+          PYTHON_EOF
+        env:
+          NEW_VERSION: ${{ needs.create-release.outputs.new-version }}
+          MAJOR_VERSION: ${{ needs.create-release.outputs.major-version }}
 
-      - name: Commit changes
+      - name: Commit documentation updates
         run: |
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          
-          if [[ -n "$(git status --porcelain)" ]]; then
+          if [[ -f "update_flag.txt" && "$(cat update_flag.txt)" == "true" ]]; then
             echo "📝 Committing documentation updates..."
             git add README.md VERSION.md
-            git commit -m "docs: update version references to ${{ steps.version.outputs.latest }} [skip ci]"
-            echo "🚀 Pushing changes to repository..."
+            git commit -m "docs: update version references to ${{ needs.create-release.outputs.new-version }} [skip ci]"
             git push
-            echo "✅ Version documentation updated successfully"
+            echo "✅ Documentation updated successfully"
+            rm -f update_flag.txt
           else
-            echo "ℹ️  No documentation changes needed"
+            echo "ℹ️  No documentation changes to commit"
           fi
 
-  notify-consumers:
-    needs: [detect-changes, create-release, update-documentation]
-    if: needs.detect-changes.outputs.has-changes == 'true'
+  # Notification job for workflow completion
+  notify-completion:
+    name: Notify Release Complete
+    needs: [analyze-changes, create-release, update-documentation]
+    if: always() && needs.analyze-changes.outputs.has-changes == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Notify about release
+      - name: Report release status
         run: |
-          workflows="${{ needs.detect-changes.outputs.changed-workflows }}"
-          echo "🚀 New release created for workflows: $workflows"
-          echo "📝 Consuming repositories should consider updating their workflow references"
-          echo "🔒 For maximum stability, pin to specific versions"
+          release_status="${{ needs.create-release.result }}"
+          docs_status="${{ needs.update-documentation.result }}"
+          new_version="${{ needs.create-release.outputs.new-version }}"
+          workflows="${{ needs.analyze-changes.outputs.changed-workflows }}"
+          
+          echo "=== 🚀 Docker Ops Release Summary ==="
+          echo "Version: $new_version"
+          echo "Workflows: $workflows"
+          echo "Release: $release_status"
+          echo "Documentation: $docs_status"
+          
+          if [[ "$release_status" == "success" && "$docs_status" == "success" ]]; then
+            echo "✅ Release completed successfully!"
+            echo "🏷️  New version $new_version is now available"
+            echo "📚 Documentation updated automatically"
+          else
+            echo "❌ Release completed with issues"
+            echo "Release status: $release_status"  
+            echo "Documentation status: $docs_status"
+            exit 1
+          fi
