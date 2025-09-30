@@ -78,7 +78,7 @@ jobs:
 
       - name: "Dependency Review (Attempt 1)"
         id: dependency-review
-        uses: actions/dependency-review-action@595b5aeba73380359d98a5e087f648dbb0edce1b # v4.7.3
+        uses: actions/dependency-review-action@56339e523c0409420f6c2c9a2f4292bbb3c07dd3 # v4.8.0
         continue-on-error: ${{ inputs.enable_retry }}
         with:
           # Fail the action on vulnerabilities
@@ -96,7 +96,7 @@ jobs:
       - name: "Dependency Review (Retry)"
         id: dependency-review-retry
         if: inputs.enable_retry && steps.dependency-review.outcome == 'failure' && inputs.retry_times > 1
-        uses: actions/dependency-review-action@595b5aeba73380359d98a5e087f648dbb0edce1b # v4.7.3
+        uses: actions/dependency-review-action@56339e523c0409420f6c2c9a2f4292bbb3c07dd3 # v4.8.0
         continue-on-error: true
         with:
           fail-on-severity: ${{ inputs.fail_on_severity }}
