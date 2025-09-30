@@ -141,7 +141,7 @@ jobs:
         id: ml
         # Using base action with MEGALINTER_FLAVOR env var for flexibility
         # More info at https://megalinter.io/flavors/
-        uses: oxsecurity/megalinter@e08c2b05e3dbc40af4c23f41172ef1e068a7d651 # v8.8.0
+        uses: oxsecurity/megalinter@0dcbedd66ea456ba2d54fd350affaa15df8a0da3 # v9.0.1
         continue-on-error: false # Let it fail if there are critical issues
         env:
           # All available variables are described in documentation
